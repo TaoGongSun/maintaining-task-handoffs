@@ -1,0 +1,4 @@
+interface:
+  display_name: "Maintain Task Handoffs"
+  short_description: "Preserve compact continuation state for long tasks"
+  default_prompt: "Maintain a concise project handoff for this long-running task."
