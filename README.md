@@ -6,7 +6,11 @@
 
 ## 這是做什麼的
 
-長任務常跨好幾個對話。上一輪做了什麼、卡在哪、下一步是什麼——若只留在聊天記錄裡，新 session 就要重讀或重講。
+這個 skill 主要處理一種很常見、也很昂貴的長任務斷點：代理完成一段長時間工作後，使用者因為等太久而離開；等使用者回來時，對話可能早已結束超過五分鐘，原本仍在快取中的內容已被移出。這時才手動呼叫 `/handoff`，模型往往必須重新讀取整份長任務的大量 context，不只慢，也會再次產生成本。
+
+因此，本 skill 會在長任務結束、中斷或必須暫停時，自動建立交接文件。它把握 context 仍在快取中、模型注意力仍集中在當前工作上的時機，產出高品質但精簡的當前狀態，讓下一輪只需讀取一份小文件，不必重新吞下整段長對話。
+
+長任務也常跨好幾個對話。上一輪做了什麼、卡在哪、下一步是什麼——若只留在聊天記錄裡，新 session 就要重讀或重講。
 
 這個 skill 讓相容的 coding agent 在**長任務結束或中斷時**，把**目前進度與接續狀態**寫成一份精簡、預設不進 Git 的本機文件：
 
@@ -54,9 +58,11 @@ cd maintaining-task-handoffs
 ./scripts/install.sh --skill-only
 ```
 
-### B. skill + 可選全域 adapter（建議）
+### B. skill + CLI、hooks 與全域 adapter（建議）
 
 Adapter 是**有起迄標記的短區塊**，只**附加一次**到各平台全域說明檔，**不覆寫**你既有規則。重複執行安裝**不會**插入第二份。
+
+安裝器會先檢查本機 Claude／Codex 是否呈現 hook 能力。可確認時，合併本工具的 hooks 並保留既有 hooks；無法確認時只安裝手動 CLI 閘門並顯示降級訊息。Codex 的非管理 hooks 仍需在 `/hooks` 檢查與信任。
 
 ```bash
 ./scripts/install.sh
@@ -97,11 +103,33 @@ $HOME/.agents/backups/maintaining-task-handoffs-<timestamp>/
 
 ```gitignore
 .ai/HANDOFF.md
+.ai/handoff-state.json
+.ai/handoff-metrics.jsonl
+.ai/handoff-hook-errors.jsonl
+.ai/handoff-transaction.json
 .ai/designs/
 .ai/plans/
 ```
 
 進度／交接文件留在磁碟給下一輪讀即可；除非你明確要求，否則**不建議**提交進專案 Git。
+
+## 半硬式閘門
+
+長任務仍由代理依情境判定。未標記的短任務不建立 state，也不覆寫既有 HANDOFF。一旦標記，`.ai/handoff-state.json` 會保存 task identity，之後必須通過：
+
+```bash
+handoff checkpoint --task-id <id> --input <draft.md> --harness claude
+handoff validate --task-id <id>
+handoff complete --task-id <id> --input <completed-draft.md> --harness claude
+```
+
+草稿語意由代理撰寫。Validator 不補寫或改寫內容，只檢查結構、task identity、時間、repo／branch／HEAD／dirty state、唯一 Next action 與常見秘密格式。Checkpoint 使用同目錄暫存檔、`fsync` 與原子取代覆寫 `.ai/HANDOFF.md`。
+
+Claude 與支援 hooks 的 Codex 會在 `PreCompact` 阻擋 stale active task，並在 `Stop` 要求 `handoff complete` 成功。Hook 失敗記在 `.ai/handoff-hook-errors.jsonl`；完成嘗試記在 `.ai/handoff-metrics.jsonl`。`handoff compliance` 回報有效數、嘗試數與合規率，不保存 HANDOFF 內容。
+
+若代理被 `Stop` 擋下後仍再次嘗試停止，hook 會以「blocked failure」終止該次續跑，保留 active state 並計入失敗分母，避免無限迴圈；這不算正常完成。
+
+SIGKILL、斷電、宿主崩潰、hook 未啟用或未信任時，無法保證最後 checkpoint。較早的 checkpoint 只能降低損失，不能消除它。
 
 ## 行為摘要
 
@@ -132,7 +160,11 @@ $HOME/.agents/backups/maintaining-task-handoffs-<timestamp>/
 
 ## What this is for
 
-Long coding tasks often span multiple chat sessions. What was done, what is blocked, and what to do next usually lives only in the conversation—so a fresh session has to re-read or re-explain everything.
+This skill primarily addresses a common and expensive failure point in long tasks: after an agent finishes a lengthy stretch of work, the user leaves because the wait was long. By the time they return, the conversation may have been idle for more than five minutes and its context may no longer be cached. Calling `/handoff` only then can force the model to read the long task's full context again, adding both latency and cost.
+
+To avoid that late reconstruction, this skill automatically creates a handoff when a long task ends, is interrupted, or must pause. It captures the state while the context is still cached and the model's attention is focused on the work, producing a high-quality but compact document. The next session reads that small handoff instead of loading the entire conversation again.
+
+Long coding tasks also often span multiple chat sessions. What was done, what is blocked, and what to do next usually lives only in the conversation—so a fresh session has to re-read or re-explain everything.
 
 This skill tells compatible coding agents to keep a **compact, local-only progress / status file** when a **long task finishes or is interrupted**:
 
@@ -178,9 +210,11 @@ cd maintaining-task-handoffs
 ./scripts/install.sh --skill-only
 ```
 
-### B. Skill + optional global adapters (recommended)
+### B. Skill + CLI, hooks, and global adapters (recommended)
 
 Adapters are **small marked blocks** appended **once** to each harness’s global instruction file. They do **not** replace your existing rules. Re-running install will **not** add a second copy.
+
+The installer checks whether local Claude and Codex commands expose hook capability. When detected, it merges these hooks while preserving unrelated hooks. Otherwise it installs manual CLI gates and reports degraded enforcement. Non-managed Codex hooks still require review and trust through `/hooks`.
 
 ```bash
 ./scripts/install.sh
@@ -221,11 +255,33 @@ Install adds these **once** to your Git global excludes (`core.excludesFile`, or
 
 ```gitignore
 .ai/HANDOFF.md
+.ai/handoff-state.json
+.ai/handoff-metrics.jsonl
+.ai/handoff-hook-errors.jsonl
+.ai/handoff-transaction.json
 .ai/designs/
 .ai/plans/
 ```
 
 Keep the progress/handoff file on disk for the next session. Do not commit it unless the user explicitly asks.
+
+## Semi-hard gates
+
+Long-task classification remains contextual. Unmarked short tasks create no state and do not overwrite an existing handoff. Once marked, `.ai/handoff-state.json` stores the task identity and these gates apply:
+
+```bash
+handoff checkpoint --task-id <id> --input <draft.md> --harness codex
+handoff validate --task-id <id>
+handoff complete --task-id <id> --input <completed-draft.md> --harness codex
+```
+
+The agent authors semantic content. The validator never invents or rewrites it; it checks structure, task identity, freshness, repo/branch/HEAD/dirty metadata, one valid Next action, and common secret formats. Checkpoints replace `.ai/HANDOFF.md` atomically with a same-directory temporary file and `fsync`.
+
+Claude and hook-capable Codex block stale active tasks at `PreCompact` and require successful `handoff complete` at `Stop`. Hook failures go to `.ai/handoff-hook-errors.jsonl`; completion attempts go to `.ai/handoff-metrics.jsonl`. `handoff compliance` reports valid count, attempt count, and rate without storing handoff content.
+
+If an agent tries to stop again after `Stop` already continued it, the hook ends that continuation as a blocked failure, preserves active state, and counts the failure. This avoids an infinite loop and is not treated as normal completion.
+
+SIGKILL, power loss, host failure, disabled hooks, or untrusted hooks cannot guarantee a final checkpoint. Earlier checkpoints reduce loss but cannot eliminate it.
 
 ## Behavior
 

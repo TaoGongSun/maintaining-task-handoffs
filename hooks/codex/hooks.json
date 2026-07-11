@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.agents/skills/maintaining-task-handoffs/hooks/handoff_hook.py\" --harness codex",
+            "timeout": 30,
+            "statusMessage": "Validating long-task checkpoint"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.agents/skills/maintaining-task-handoffs/hooks/handoff_hook.py\" --harness codex",
+            "timeout": 30,
+            "statusMessage": "Validating long-task completion"
+          }
+        ]
+      }
+    ]
+  }
+}

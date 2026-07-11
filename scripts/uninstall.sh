@@ -7,6 +7,7 @@ SKILL_NAME="maintaining-task-handoffs"
 MARKER_START="<!-- maintaining-task-handoffs:start -->"
 MARKER_END="<!-- maintaining-task-handoffs:end -->"
 DEST_SKILL="${HOME}/.agents/skills/${SKILL_NAME}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 remove_adapter_block() {
   local target="$1"
@@ -27,6 +28,13 @@ remove_adapter_block() {
   echo "Adapter removed: $target"
 }
 
+python3 "$SCRIPT_DIR/merge_hooks.py" remove "${HOME}/.claude/settings.json"
+python3 "$SCRIPT_DIR/merge_hooks.py" remove "${HOME}/.codex/hooks.json"
+BIN_PATH="${HOME}/.local/bin/handoff"
+EXPECTED_LINK="../../.agents/skills/${SKILL_NAME}/handoff.py"
+if [[ -L "$BIN_PATH" && "$(readlink "$BIN_PATH")" == "$EXPECTED_LINK" ]]; then
+  rm -f "$BIN_PATH"
+fi
 rm -rf "$DEST_SKILL"
 rm -f "${HOME}/.claude/skills/${SKILL_NAME}"
 rm -f "${HOME}/.grok/skills/${SKILL_NAME}"

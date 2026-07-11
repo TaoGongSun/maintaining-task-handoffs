@@ -13,9 +13,12 @@ MARKER_END="<!-- maintaining-task-handoffs:end -->"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEST_SKILL="${HOME}/.agents/skills/${SKILL_NAME}"
+BIN_DIR="${HOME}/.local/bin"
+BIN_PATH="${BIN_DIR}/handoff"
 ADAPTER_SRC="${REPO_ROOT}/adapters/trigger-block.md"
 BACKUP_DIR="${HOME}/.agents/backups/maintaining-task-handoffs-$(date +%Y%m%d-%H%M%S)"
 WITH_ADAPTERS=1
+WITH_HOOKS=1
 WITH_GITIGNORE=1
 DRY_RUN=0
 
@@ -32,7 +35,7 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --skill-only) WITH_ADAPTERS=0; shift ;;
+    --skill-only) WITH_ADAPTERS=0; WITH_HOOKS=0; shift ;;
     --no-gitignore) WITH_GITIGNORE=0; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -57,6 +60,13 @@ backup_file() {
 }
 
 install_skill() {
+  local expected_link="../../.agents/skills/${SKILL_NAME}/handoff.py"
+  if [[ -e "$BIN_PATH" || -L "$BIN_PATH" ]]; then
+    if [[ ! -L "$BIN_PATH" || "$(readlink "$BIN_PATH")" != "$expected_link" ]]; then
+      echo "Refusing to replace unrelated command: $BIN_PATH" >&2
+      return 1
+    fi
+  fi
   run mkdir -p "$(dirname "$DEST_SKILL")"
   if [[ -e "$DEST_SKILL" || -L "$DEST_SKILL" ]]; then
     if [[ -L "$DEST_SKILL" ]]; then
@@ -68,10 +78,20 @@ install_skill() {
   # Prefer copy so uninstalling the clone does not break the install.
   run mkdir -p "$DEST_SKILL/agents"
   run cp "$REPO_ROOT/SKILL.md" "$DEST_SKILL/SKILL.md"
+  run cp "$REPO_ROOT/handoff.py" "$DEST_SKILL/handoff.py"
+  run cp -R "$REPO_ROOT/handoff_core" "$DEST_SKILL/handoff_core"
+  run cp -R "$REPO_ROOT/hooks" "$DEST_SKILL/hooks"
   if [[ -f "$REPO_ROOT/agents/openai.yaml" ]]; then
     run cp "$REPO_ROOT/agents/openai.yaml" "$DEST_SKILL/agents/openai.yaml"
   fi
   echo "Installed skill: $DEST_SKILL"
+
+  run mkdir -p "$BIN_DIR"
+  if [[ -L "$BIN_PATH" ]]; then
+    run rm -f "$BIN_PATH"
+  fi
+  run ln -s "$expected_link" "$BIN_PATH"
+  echo "Installed CLI: $BIN_PATH"
 
   for link_dir in "${HOME}/.claude/skills" "${HOME}/.grok/skills"; do
     run mkdir -p "$link_dir"
@@ -83,6 +103,31 @@ install_skill() {
     run ln -s "../../.agents/skills/${SKILL_NAME}" "$link_path"
     echo "Linked: $link_path"
   done
+}
+
+install_hooks() {
+  local claude_state="missing"
+  local codex_state="missing"
+  if command -v claude >/dev/null 2>&1; then
+    claude_state="$(claude --help 2>&1 | grep -q -- '--include-hook-events' && echo detected || echo unverified)"
+  fi
+  if command -v codex >/dev/null 2>&1; then
+    codex_state="$(codex --help 2>&1 | grep -q -- '--dangerously-bypass-hook-trust' && echo detected || echo unverified)"
+  fi
+  if [[ "$claude_state" == detected ]]; then
+    backup_file "${HOME}/.claude/settings.json"
+    run python3 "$REPO_ROOT/scripts/merge_hooks.py" install "${HOME}/.claude/settings.json" "$REPO_ROOT/hooks/claude/hooks.json"
+    echo "Claude hooks installed; Claude may still require project trust."
+  else
+    echo "Claude hooks not installed (capability $claude_state); use manual CLI gates."
+  fi
+  if [[ "$codex_state" == detected ]]; then
+    backup_file "${HOME}/.codex/hooks.json"
+    run python3 "$REPO_ROOT/scripts/merge_hooks.py" install "${HOME}/.codex/hooks.json" "$REPO_ROOT/hooks/codex/hooks.json"
+    echo "Codex hooks installed; review and trust them with /hooks."
+  else
+    echo "Codex hooks not installed (capability $codex_state); use manual CLI gates."
+  fi
 }
 
 append_adapter_once() {
@@ -129,7 +174,7 @@ ensure_git_excludes() {
 
   backup_file "$excludes"
   local line
-  for line in '.ai/HANDOFF.md' '.ai/designs/' '.ai/plans/'; do
+  for line in '.ai/HANDOFF.md' '.ai/handoff-state.json' '.ai/handoff-metrics.jsonl' '.ai/handoff-hook-errors.jsonl' '.ai/handoff-transaction.json' '.ai/designs/' '.ai/plans/'; do
     if [[ -f "$excludes" ]] && grep -qxF "$line" "$excludes" 2>/dev/null; then
       echo "Ignore already present (skip): $line"
       continue
@@ -148,6 +193,9 @@ main() {
   [[ -f "$ADAPTER_SRC" ]] || { echo "Adapter missing: $ADAPTER_SRC" >&2; exit 1; }
 
   install_skill
+  if [[ "$WITH_HOOKS" -eq 1 ]]; then
+    install_hooks
+  fi
 
   if [[ "$WITH_ADAPTERS" -eq 1 ]]; then
     append_adapter_once "${HOME}/.codex/AGENTS.md"
