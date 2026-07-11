@@ -60,7 +60,7 @@ cd maintaining-task-handoffs
 
 ### B. skill + CLI、hooks 與全域 adapter（建議）
 
-Adapter 是**有起迄標記的短區塊**，只**附加一次**到各平台全域說明檔，**不覆寫**你既有規則。重複執行安裝**不會**插入第二份。
+Adapter 是**有起迄標記的短區塊**，只**附加一次**到各平台全域說明檔，**不覆寫**你既有規則。重複執行安裝會原地更新這個受管理區塊，不會插入第二份，也不會留下舊版規則。
 
 安裝器會先檢查本機 Claude／Codex 是否呈現 hook 能力。可確認時，合併本工具的 hooks 並保留既有 hooks；無法確認時只安裝手動 CLI 閘門並顯示降級訊息。Codex 的非管理 hooks 仍需在 `/hooks` 檢查與信任。
 
@@ -216,7 +216,7 @@ cd maintaining-task-handoffs
 
 ### B. Skill + CLI, hooks, and global adapters (recommended)
 
-Adapters are **small marked blocks** appended **once** to each harness’s global instruction file. They do **not** replace your existing rules. Re-running install will **not** add a second copy.
+Adapters are **small marked blocks** appended **once** to each harness’s global instruction file. They do **not** replace your existing rules. Re-running install updates the managed block in place; it neither adds a second copy nor leaves stale rules behind.
 
 The installer checks whether local Claude and Codex commands expose hook capability. When detected, it merges these hooks while preserving unrelated hooks. Otherwise it installs manual CLI gates and reports degraded enforcement. Non-managed Codex hooks still require review and trust through `/hooks`.
 

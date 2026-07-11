@@ -80,6 +80,31 @@ class HookMergeTests(unittest.TestCase):
 
 
 class InstallerTests(unittest.TestCase):
+    def test_reinstall_upgrades_managed_adapter_and_preserves_other_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp)
+            target = home / ".codex/AGENTS.md"
+            target.parent.mkdir(parents=True)
+            target.write_text(
+                "Keep this rule.\n"
+                "<!-- maintaining-task-handoffs:start -->\n"
+                "Old managed adapter.\n"
+                "<!-- maintaining-task-handoffs:end -->\n"
+                "Keep this rule too.\n",
+                encoding="utf-8",
+            )
+            env = {**os.environ, "HOME": str(home)}
+            subprocess.run(
+                ["bash", str(ROOT / "scripts/install.sh"), "--no-gitignore"],
+                cwd=ROOT, env=env, check=True, capture_output=True, text=True,
+            )
+            installed = target.read_text(encoding="utf-8")
+            current = (ROOT / "adapters/trigger-block.md").read_text(encoding="utf-8").strip()
+            self.assertNotIn("Old managed adapter.", installed)
+            self.assertIn(current, installed)
+            self.assertIn("Keep this rule.\n", installed)
+            self.assertIn("Keep this rule too.\n", installed)
+
     def test_install_is_idempotent_and_installs_cli_hooks_and_skill(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             home = Path(temp)

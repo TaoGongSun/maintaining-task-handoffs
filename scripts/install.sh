@@ -8,8 +8,6 @@
 set -euo pipefail
 
 SKILL_NAME="maintaining-task-handoffs"
-MARKER_START="<!-- maintaining-task-handoffs:start -->"
-MARKER_END="<!-- maintaining-task-handoffs:end -->"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEST_SKILL="${HOME}/.agents/skills/${SKILL_NAME}"
@@ -130,33 +128,19 @@ install_hooks() {
   fi
 }
 
-append_adapter_once() {
+install_adapter() {
   local target="$1"
   local parent
   parent="$(dirname "$target")"
   run mkdir -p "$parent"
 
-  if [[ -f "$target" ]] && grep -qF "$MARKER_START" "$target" 2>/dev/null; then
-    echo "Adapter already present (skip): $target"
-    return 0
-  fi
-
   backup_file "$target"
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "[dry-run] append adapter -> $target"
+    echo "[dry-run] install or update adapter -> $target"
     return 0
   fi
-  # Ensure trailing newline before block
-  if [[ -f "$target" && -s "$target" ]]; then
-    printf '\n' >>"$target"
-  else
-    : >"$target"
-  fi
-  # Substitute $HOME literally for the current user path in the block is wrong;
-  # keep $HOME as text for portability across machines.
-  cat "$ADAPTER_SRC" >>"$target"
-  printf '\n' >>"$target"
-  echo "Adapter appended: $target"
+  python3 "$REPO_ROOT/scripts/merge_adapter.py" "$target" "$ADAPTER_SRC"
+  echo "Adapter installed or updated: $target"
 }
 
 ensure_git_excludes() {
@@ -198,9 +182,9 @@ main() {
   fi
 
   if [[ "$WITH_ADAPTERS" -eq 1 ]]; then
-    append_adapter_once "${HOME}/.codex/AGENTS.md"
-    append_adapter_once "${HOME}/.claude/Claude.md"
-    append_adapter_once "${HOME}/.gemini/GEMINI.md"
+    install_adapter "${HOME}/.codex/AGENTS.md"
+    install_adapter "${HOME}/.claude/Claude.md"
+    install_adapter "${HOME}/.gemini/GEMINI.md"
   fi
 
   if [[ "$WITH_GITIGNORE" -eq 1 ]]; then
