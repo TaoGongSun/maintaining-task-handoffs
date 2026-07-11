@@ -10,6 +10,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SkillContractTests(unittest.TestCase):
+    def assert_event_based_checkpoint_contract(self, text: str) -> None:
+        lowered = text.lower()
+        for phrase in (
+            "at activation",
+            "before compaction",
+            "pauses or becomes blocked",
+            "milestone whose loss",
+            "ordinary edits and test runs",
+        ):
+            self.assertIn(phrase, lowered)
+        self.assertNotIn("whenever state changes materially", lowered)
+
     def test_skill_names_soft_activation_and_three_hard_gates(self) -> None:
         text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("soft", text.lower())
@@ -18,12 +30,28 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("handoff complete", text)
         self.assertIn("Short tasks", text)
         self.assertIn("cannot guarantee", text)
+        self.assert_event_based_checkpoint_contract(text)
 
     def test_adapter_requires_cli_after_activation(self) -> None:
         text = (ROOT / "adapters/trigger-block.md").read_text(encoding="utf-8")
         self.assertIn("handoff checkpoint", text)
         self.assertIn("handoff complete", text)
         self.assertIn("Do not activate", text)
+        self.assert_event_based_checkpoint_contract(text)
+
+    def test_readme_documents_bounded_context_contract_bilingually(self) -> None:
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        for phrase in (
+            "8 KiB",
+            "handoff_too_large",
+            "本機 I/O",
+            "不會將 HANDOFF 內容注入模型 context",
+            "local I/O",
+            "does not inject HANDOFF contents into model context",
+            "一般編輯與測試不會各自觸發 checkpoint",
+            "ordinary edits and tests do not independently trigger checkpoints",
+        ):
+            self.assertIn(phrase.lower(), text.lower())
 
 
 class HookMergeTests(unittest.TestCase):

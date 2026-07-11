@@ -14,6 +14,7 @@ REQUIRED_SECTIONS = (
     "Constraints",
 )
 PLACEHOLDERS = {"tbd", "todo", "none", "n/a", "unknown", "later", "-"}
+MAX_DRAFT_BYTES = 8 * 1024
 
 
 class DocumentError(ValueError):
@@ -63,6 +64,8 @@ def scan_secrets(text: str) -> list[SecretFinding]:
 
 
 def parse_draft(text: str, expected_task_id: str) -> Draft:
+    if len(text.encode("utf-8")) > MAX_DRAFT_BYTES:
+        raise DocumentError("handoff_too_large")
     findings = scan_secrets(text)
     if findings:
         summary = ", ".join(f"{item.kind}@{item.line}" for item in findings)

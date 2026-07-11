@@ -123,7 +123,11 @@ handoff validate --task-id <id>
 handoff complete --task-id <id> --input <completed-draft.md> --harness claude
 ```
 
-草稿語意由代理撰寫。Validator 不補寫或改寫內容，只檢查結構、task identity、時間、repo／branch／HEAD／dirty state、唯一 Next action 與常見秘密格式。Checkpoint 使用同目錄暫存檔、`fsync` 與原子取代覆寫 `.ai/HANDOFF.md`。
+草稿語意由代理撰寫。Validator 不補寫或改寫內容；草稿上限為 **8 KiB UTF-8**，超過時以 `handoff_too_large` 拒絕，不會截斷。它也檢查結構、task identity、時間、repo／branch／HEAD／dirty state、唯一 Next action 與常見秘密格式。Checkpoint 使用同目錄暫存檔、`fsync` 與原子取代覆寫 `.ai/HANDOFF.md`。
+
+Checkpoint 採事件式寫入：啟用長任務時、compaction 前且既有 checkpoint 已 stale、工作暫停或阻塞時，或完成一個一旦遺失就必須大量重建的里程碑後。一般編輯與測試不會各自觸發 checkpoint。正常收尾直接驗證最新 completed draft，不要求先重寫一份內容重複的 in-progress checkpoint。
+
+Hook 的 state 與 HANDOFF 檢查都是本機 I/O：inactive hook 只讀 state，active `PreCompact` 才在本機驗證 HANDOFF；它不會將 HANDOFF 內容注入模型 context，失敗時只回傳簡短修正指令。
 
 Claude 與支援 hooks 的 Codex 會在 `PreCompact` 阻擋 stale active task，並在 `Stop` 要求 `handoff complete` 成功。Hook 失敗記在 `.ai/handoff-hook-errors.jsonl`；完成嘗試記在 `.ai/handoff-metrics.jsonl`。`handoff compliance` 回報有效數、嘗試數與合規率，不保存 HANDOFF 內容。
 
@@ -275,7 +279,11 @@ handoff validate --task-id <id>
 handoff complete --task-id <id> --input <completed-draft.md> --harness codex
 ```
 
-The agent authors semantic content. The validator never invents or rewrites it; it checks structure, task identity, freshness, repo/branch/HEAD/dirty metadata, one valid Next action, and common secret formats. Checkpoints replace `.ai/HANDOFF.md` atomically with a same-directory temporary file and `fsync`.
+The agent authors semantic content. The validator never invents or rewrites it. Drafts have an **8 KiB UTF-8** ceiling; larger inputs fail with `handoff_too_large` and are never truncated. It also checks structure, task identity, freshness, repo/branch/HEAD/dirty metadata, one valid Next action, and common secret formats. Checkpoints replace `.ai/HANDOFF.md` atomically with a same-directory temporary file and `fsync`.
+
+Checkpoint writes are event-based: at long-task activation, before compaction when the existing checkpoint is stale, when work pauses or becomes blocked, or after a milestone whose loss would require material reconstruction. Ordinary edits and tests do not independently trigger checkpoints. Normal completion validates the latest completed draft directly and does not require a redundant in-progress checkpoint first.
+
+Hook state and HANDOFF checks are local I/O: an inactive hook reads only state, while an active `PreCompact` validates HANDOFF locally. It does not inject HANDOFF contents into model context; failures return only a short corrective instruction.
 
 Claude and hook-capable Codex block stale active tasks at `PreCompact` and require successful `handoff complete` at `Stop`. Hook failures go to `.ai/handoff-hook-errors.jsonl`; completion attempts go to `.ai/handoff-metrics.jsonl`. `handoff compliance` reports valid count, attempt count, and rate without storing handoff content.
 

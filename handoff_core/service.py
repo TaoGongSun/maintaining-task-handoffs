@@ -102,10 +102,13 @@ class HandoffService:
         return Result(True, "valid")
 
     def complete(self, task_id: str, text: str, harness: str, fresh_minutes: int) -> Result:
-        current = self.validate(task_id, fresh_minutes)
-        if not current.ok:
-            self._metric("complete", task_id, harness, False, current.code)
-            return current
+        state = self._state()
+        if not state or state.get("phase") != "active":
+            self._metric("complete", task_id, harness, False, "no_active_task")
+            return Result(False, "no_active_task")
+        if state.get("task_id") != task_id:
+            self._metric("complete", task_id, harness, False, "task_id_mismatch")
+            return Result(False, "task_id_mismatch")
         try:
             draft = parse_draft(text, task_id)
             if draft.status != "completed":
@@ -114,8 +117,7 @@ class HandoffService:
             self._metric("complete", task_id, harness, False, error.code)
             raise
         metadata = git_metadata(self.root)
-        state = self._state() or {}
-        if state.get("git") != metadata.to_dict():
+        if git_metadata(self.root).to_dict() != metadata.to_dict():
             self._metric("complete", task_id, harness, False, "stale_git")
             return Result(False, "stale_git")
         updated = self.now().astimezone(timezone.utc).isoformat()

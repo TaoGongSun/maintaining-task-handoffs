@@ -19,11 +19,11 @@ The draft must contain `# Task handoff`, `Task-ID`, `Status`, and those seven `#
 
 ## Hard gates
 
-1. Immediately after activation and whenever state changes materially, author a fresh draft and run:
+1. At activation, author the initial draft and run:
 
    `handoff checkpoint --task-id <id> --input <draft> --harness <harness>`
 
-2. Before compaction, require a fresh valid checkpoint. A configured `PreCompact` hook blocks stale active tasks.
+2. During active work, write another checkpoint only at a recovery boundary: before compaction when validation is stale; when work pauses or becomes blocked; or after a milestone whose loss would require material reconstruction. Ordinary edits and test runs do not independently require checkpoint rewrites. A configured `PreCompact` hook blocks stale active tasks.
 
 3. Before finishing, author a completed draft and run:
 

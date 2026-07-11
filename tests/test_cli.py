@@ -87,12 +87,15 @@ Run completion.
             self.assertEqual(0, validate.returncode)
             self.assertEqual("valid", json.loads(validate.stdout)["code"])
 
+            (repo / "tracked").write_text("changed", encoding="utf-8")
             draft_path.write_text(completed, encoding="utf-8")
             complete = self.run_cli(
                 "complete", "--task-id", "cli-task", "--input", str(draft_path),
                 "--harness", "test", cwd=repo
             )
             self.assertEqual(0, complete.returncode, complete.stdout)
+            handoff = (repo / ".ai/HANDOFF.md").read_text(encoding="utf-8")
+            self.assertIn("- Dirty: true", handoff)
 
             report = self.run_cli("compliance", cwd=repo)
             self.assertEqual(0, report.returncode)

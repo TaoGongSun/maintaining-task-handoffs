@@ -66,6 +66,30 @@ class RepoCase(unittest.TestCase):
 
 
 class DocumentTests(unittest.TestCase):
+    @staticmethod
+    def sized_draft(target_bytes: int) -> str:
+        marker = "PADDING"
+        skeleton = BASE_DRAFT.replace("- CLI contract.", marker).format(status="in-progress")
+        fixed_bytes = len(skeleton.encode("utf-8")) - len(marker.encode("utf-8"))
+        return skeleton.replace(marker, "x" * (target_bytes - fixed_bytes))
+
+    def test_draft_size_boundary_uses_utf8_bytes(self) -> None:
+        exact = self.sized_draft(8192)
+        self.assertEqual(8192, len(exact.encode("utf-8")))
+        self.assertEqual("in-progress", parse_draft(exact, "task-123").status)
+
+        oversized = self.sized_draft(8193)
+        with self.assertRaisesRegex(DocumentError, "handoff_too_large"):
+            parse_draft(oversized, "task-123")
+
+    def test_multibyte_draft_is_rejected_by_encoded_size(self) -> None:
+        oversized = BASE_DRAFT.replace(
+            "- CLI contract.", "界" * 2700
+        ).format(status="in-progress")
+        self.assertGreater(len(oversized.encode("utf-8")), 8192)
+        with self.assertRaisesRegex(DocumentError, "handoff_too_large"):
+            parse_draft(oversized, "task-123")
+
     def test_missing_section_is_rejected(self) -> None:
         with self.assertRaisesRegex(DocumentError, "missing_section"):
             parse_draft(BASE_DRAFT.replace("## Goal", "## Purpose").format(status="in-progress"), "task-123")
@@ -227,10 +251,17 @@ class CompleteTests(RepoCase):
             "Run the hook contract tests.", "你目前不需要做任何事。"
         ).format(status="completed")
 
-    def test_complete_requires_active_fresh_checkpoint(self) -> None:
+    def test_complete_requires_active_task(self) -> None:
         result = self.service.complete("task-123", self.completed_draft(), harness="test", fresh_minutes=30)
         self.assertFalse(result.ok)
         self.assertEqual("no_active_task", result.code)
+
+    def test_complete_rejects_task_id_mismatch(self) -> None:
+        self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
+        other = self.completed_draft().replace("task-123", "other-task")
+        result = self.service.complete("other-task", other, harness="test", fresh_minutes=30)
+        self.assertFalse(result.ok)
+        self.assertEqual("task_id_mismatch", result.code)
 
     def test_complete_rejects_non_completed_draft(self) -> None:
         self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
@@ -240,15 +271,26 @@ class CompleteTests(RepoCase):
         self.assertEqual(1, report["attempts"])
         self.assertEqual(0, report["valid"])
 
-    def test_complete_rejects_stale_git_and_records_failure(self) -> None:
+    def test_complete_accepts_stale_checkpoint_time(self) -> None:
+        self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
+        self.now += timedelta(minutes=31)
+        result = self.service.complete("task-123", self.completed_draft(), harness="test", fresh_minutes=30)
+        self.assertTrue(result.ok)
+
+    def test_complete_accepts_current_draft_after_tracked_changes(self) -> None:
         self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
         (self.repo / "tracked.txt").write_text("dirty\n", encoding="utf-8")
         result = self.service.complete("task-123", self.completed_draft(), harness="codex", fresh_minutes=30)
-        self.assertFalse(result.ok)
-        self.assertEqual("stale_git", result.code)
-        metrics = (self.repo / ".ai/handoff-metrics.jsonl").read_text(encoding="utf-8")
-        self.assertIn('"reason": "stale_git"', metrics)
-        self.assertNotIn("Ship the handoff gate", metrics)
+        self.assertTrue(result.ok)
+        self.assertIn("- Dirty: true", self.service.handoff.read_text(encoding="utf-8"))
+
+    def test_invalid_completed_draft_preserves_existing_handoff(self) -> None:
+        self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
+        original = self.service.handoff.read_text(encoding="utf-8")
+        oversized = self.completed_draft().replace("- CLI contract.", "x" * 9000)
+        with self.assertRaisesRegex(DocumentError, "handoff_too_large"):
+            self.service.complete("task-123", oversized, harness="test", fresh_minutes=30)
+        self.assertEqual(original, self.service.handoff.read_text(encoding="utf-8"))
 
     def test_complete_writes_completed_state_and_compliance_metrics(self) -> None:
         self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
