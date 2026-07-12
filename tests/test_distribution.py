@@ -38,6 +38,9 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("handoff complete", text)
         self.assertIn("Do not activate", text)
         self.assert_event_based_checkpoint_contract(text)
+        self.assertIn("list only those plans under `## Plan files`", text)
+        self.assertIn("archive only the listed plans", text)
+        self.assertIn("Never scan directories for unrelated plans", text)
 
     def test_readme_documents_bounded_context_contract_bilingually(self) -> None:
         text = (ROOT / "README.md").read_text(encoding="utf-8")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -116,15 +117,90 @@ class HandoffService:
         except DocumentError as error:
             self._metric("complete", task_id, harness, False, error.code)
             raise
-        metadata = git_metadata(self.root)
-        if git_metadata(self.root).to_dict() != metadata.to_dict():
-            self._metric("complete", task_id, harness, False, "stale_git")
-            return Result(False, "stale_git")
-        updated = self.now().astimezone(timezone.utc).isoformat()
-        state.update({"phase": "completed", "updated": updated, "git": metadata.to_dict()})
-        self._commit_pair(render(draft, updated, metadata), state)
+        now = self.now().astimezone(timezone.utc)
+        try:
+            moves = self._plan_archive_moves(draft.plan_files, now.year)
+        except DocumentError as error:
+            self._metric("complete", task_id, harness, False, error.code)
+            raise
+        previous_document = self.handoff.read_text(encoding="utf-8")
+        previous_state = dict(state)
+        moved: list[tuple[Path, Path]] = []
+        try:
+            for source, destination in moves:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(source, destination)
+                moved.append((source, destination))
+            metadata = git_metadata(self.root)
+            if git_metadata(self.root).to_dict() != metadata.to_dict():
+                raise DocumentError("stale_git")
+            updated = now.isoformat()
+            state.update({"phase": "completed", "updated": updated, "git": metadata.to_dict()})
+            self._commit_pair(render(draft, updated, metadata), state)
+        except Exception as error:
+            for source, destination in reversed(moved):
+                source.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(destination, source)
+            self._restore_completion_state(previous_document, previous_state)
+            reason = error.code if isinstance(error, DocumentError) else "io_error"
+            self._metric("complete", task_id, harness, False, reason)
+            if isinstance(error, DocumentError) and error.code == "stale_git":
+                return Result(False, "stale_git")
+            raise
         self._metric("complete", task_id, harness, True, "valid")
         return Result(True, "completed")
+
+    def _restore_completion_state(self, document: str, state: dict[str, object]) -> None:
+        if self.handoff.read_text(encoding="utf-8") != document:
+            write_text(self.handoff, document)
+        if self._state() != state:
+            write_json(self.state_path, state)
+        self.transaction_path.unlink(missing_ok=True)
+
+    def _plan_archive_moves(self, plan_files: tuple[str, ...], year: int) -> list[tuple[Path, Path]]:
+        moves: list[tuple[Path, Path]] = []
+        destinations: set[Path] = set()
+        for value in plan_files:
+            if "\\" in value:
+                raise DocumentError("plan_path_outside_repo")
+            relative = Path(value)
+            if relative.is_absolute() or not relative.parts or relative == Path(".") or ".." in relative.parts:
+                raise DocumentError("plan_path_outside_repo")
+            if "archive" in relative.parts:
+                raise DocumentError("plan_already_archived")
+            source = self.root / relative
+            self._reject_symlink_components(source)
+            try:
+                source.resolve(strict=False).relative_to(self.root)
+            except ValueError as error:
+                raise DocumentError("plan_path_outside_repo") from error
+            if not source.is_file():
+                raise DocumentError("plan_file_missing")
+            if relative.parts[:2] == (".ai", "plans"):
+                remainder = Path(*relative.parts[2:])
+                if not remainder.parts:
+                    raise DocumentError("invalid_plan_file_entry")
+                destination = self.root / ".ai" / "archive" / "plans" / str(year) / remainder
+            else:
+                destination = source.parent / "archive" / str(year) / source.name
+            self._reject_symlink_components(destination)
+            try:
+                destination.resolve(strict=False).relative_to(self.root)
+            except ValueError as error:
+                raise DocumentError("plan_path_outside_repo") from error
+            if destination.exists() or destination in destinations:
+                raise DocumentError("plan_archive_conflict")
+            destinations.add(destination)
+            moves.append((source, destination))
+        return moves
+
+    def _reject_symlink_components(self, path: Path) -> None:
+        relative = path.relative_to(self.root)
+        current = self.root
+        for part in relative.parts:
+            current /= part
+            if current.is_symlink():
+                raise DocumentError("plan_symlink_rejected")
 
     def _metric(self, event: str, task_id: str, harness: str, ok: bool, reason: str) -> None:
         self.ai.mkdir(parents=True, exist_ok=True)

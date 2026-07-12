@@ -17,6 +17,8 @@ Write the meaning yourself. The CLI validates but never invents Goal, Current st
 
 The draft must contain `# Task handoff`, `Task-ID`, `Status`, and those seven `##` sections. Never include secrets.
 
+If the current task has plan documents, add an optional `## Plan files` section with one repo-relative path per Markdown bullet. List only plans owned by the current task. Never scan directories for other plans.
+
 ## Hard gates
 
 1. At activation, author the initial draft and run:
@@ -28,6 +30,8 @@ The draft must contain `# Task handoff`, `Task-ID`, `Status`, and those seven `#
 3. Before finishing, author a completed draft and run:
 
    `handoff complete --task-id <id> --input <draft> --harness <harness>`
+
+   Completion archives only files explicitly listed under the current HANDOFF's `## Plan files`. General plans move to a sibling `archive/<year>/` directory. Plans under `.ai/plans/` move to `.ai/archive/plans/<year>/`. Checkpoint, blocked, and unfinished states never archive plans. Invalid sources or destinations and any archival failure block completion; multi-file archival is all-or-nothing.
 
 If hooks are unavailable or untrusted, run these commands manually and report that enforcement was degraded. Hook errors are observable under `.ai/`; do not describe a failed hook as successful.
 

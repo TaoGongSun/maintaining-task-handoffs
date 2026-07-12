@@ -13,6 +13,7 @@ REQUIRED_SECTIONS = (
     "Next action",
     "Constraints",
 )
+PLAN_FILES_SECTION = "Plan files"
 PLACEHOLDERS = {"tbd", "todo", "none", "n/a", "unknown", "later", "-"}
 MAX_DRAFT_BYTES = 8 * 1024
 
@@ -38,6 +39,24 @@ class Draft:
     task_id: str
     status: str
     sections: dict[str, str]
+
+    @property
+    def plan_files(self) -> tuple[str, ...]:
+        value = self.sections.get(PLAN_FILES_SECTION, "")
+        paths: list[str] = []
+        for line in value.splitlines():
+            item = line.strip()
+            if not item or not item.startswith("- "):
+                raise DocumentError("invalid_plan_file_entry")
+            path = item[2:].strip()
+            if path.startswith("`") and path.endswith("`") and len(path) > 2:
+                path = path[1:-1]
+            if not path:
+                raise DocumentError("invalid_plan_file_entry")
+            paths.append(path)
+        if len(paths) != len(set(paths)):
+            raise DocumentError("duplicate_plan_file")
+        return tuple(paths)
 
 
 SECRET_PATTERNS = (
@@ -100,7 +119,9 @@ def parse_draft(text: str, expected_task_id: str) -> Draft:
     status = status_match.group(1)
     if status == "completed" and action != "你目前不需要做任何事。":
         raise DocumentError("completed_next_action")
-    return Draft(task_match.group(1), status, sections)
+    draft = Draft(task_match.group(1), status, sections)
+    draft.plan_files
+    return draft
 
 
 def render(draft: Draft, updated: str, metadata: object) -> str:
@@ -113,6 +134,8 @@ def render(draft: Draft, updated: str, metadata: object) -> str:
     ]
     for name in REQUIRED_SECTIONS[:4]:
         lines.extend((f"## {name}", draft.sections[name], ""))
+    if PLAN_FILES_SECTION in draft.sections:
+        lines.extend((f"## {PLAN_FILES_SECTION}", draft.sections[PLAN_FILES_SECTION], ""))
     lines.extend(
         (
             "## Working context",
