@@ -65,6 +65,35 @@ class RepoCase(unittest.TestCase):
         return BASE_DRAFT.format(status=status)
 
 
+class LifecycleTests(RepoCase):
+    def test_pause_closes_current_run_without_completing_goal(self) -> None:
+        self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
+
+        result = self.service.pause("task-123", self.draft(), harness="test", fresh_minutes=30)
+
+        self.assertTrue(result.ok)
+        self.assertEqual("paused", result.code)
+        self.assertEqual("paused", self.service._state()["phase"])
+        handoff = self.service.handoff.read_text(encoding="utf-8")
+        self.assertIn("Status: in-progress", handoff)
+        self.assertIn("Run the hook contract tests.", handoff)
+
+    def test_pause_rejects_a_completed_goal(self) -> None:
+        self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
+
+        with self.assertRaisesRegex(DocumentError, "pause_status_completed"):
+            self.service.pause("task-123", self.draft("completed"), harness="test", fresh_minutes=30)
+
+    def test_checkpoint_resumes_a_paused_task(self) -> None:
+        self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
+        self.service.pause("task-123", self.draft(), harness="test", fresh_minutes=30)
+
+        result = self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
+
+        self.assertTrue(result.ok)
+        self.assertEqual("active", self.service._state()["phase"])
+
+
 class DocumentTests(unittest.TestCase):
     @staticmethod
     def sized_draft(target_bytes: int) -> str:
@@ -109,14 +138,11 @@ class DocumentTests(unittest.TestCase):
         with self.assertRaisesRegex(DocumentError, "next_action_placeholder"):
             parse_draft(todo, "task-123")
 
-    def test_completed_uses_fixed_no_action_sentence(self) -> None:
-        invalid = BASE_DRAFT.format(status="completed")
-        with self.assertRaisesRegex(DocumentError, "completed_next_action"):
-            parse_draft(invalid, "task-123")
-        valid = BASE_DRAFT.replace(
-            "Run the hook contract tests.", "你目前不需要做任何事。"
-        ).format(status="completed")
-        self.assertEqual("completed", parse_draft(valid, "task-123").status)
+    def test_completed_keeps_a_concrete_next_action(self) -> None:
+        draft = BASE_DRAFT.format(status="completed")
+        parsed = parse_draft(draft, "task-123")
+        self.assertEqual("completed", parsed.status)
+        self.assertEqual("Run the hook contract tests.", parsed.sections["Next action"])
 
     def test_secret_errors_name_type_and_line_but_not_value(self) -> None:
         secret = "token = ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"
@@ -248,7 +274,7 @@ class CheckpointTests(RepoCase):
 class CompleteTests(RepoCase):
     def completed_draft(self) -> str:
         return BASE_DRAFT.replace(
-            "Run the hook contract tests.", "你目前不需要做任何事。"
+            "Run the hook contract tests.", "Read HANDOFF.md before starting follow-up work."
         ).format(status="completed")
 
     def test_complete_requires_active_task(self) -> None:

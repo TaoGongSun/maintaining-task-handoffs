@@ -102,6 +102,31 @@ class HandoffService:
             return Result(False, "metadata_mismatch")
         return Result(True, "valid")
 
+    def pause(self, task_id: str, text: str, harness: str, fresh_minutes: int) -> Result:
+        state = self._state()
+        if not state or state.get("phase") != "active":
+            return Result(False, "no_active_task")
+        if state.get("task_id") != task_id:
+            return Result(False, "task_id_mismatch")
+        draft = parse_draft(text, task_id)
+        if draft.status == "completed":
+            raise DocumentError("pause_status_completed")
+        metadata = git_metadata(self.root)
+        if git_metadata(self.root).to_dict() != metadata.to_dict():
+            return Result(False, "stale_git")
+        updated = self.now().astimezone(timezone.utc).isoformat()
+        state.update(
+            {
+                "phase": "paused",
+                "updated": updated,
+                "fresh_minutes": fresh_minutes,
+                "harness": harness,
+                "git": metadata.to_dict(),
+            }
+        )
+        self._commit_pair(render(draft, updated, metadata), state)
+        return Result(True, "paused")
+
     def complete(self, task_id: str, text: str, harness: str, fresh_minutes: int) -> Result:
         state = self._state()
         if not state or state.get("phase") != "active":

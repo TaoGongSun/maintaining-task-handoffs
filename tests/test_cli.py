@@ -20,10 +20,11 @@ class CliContractTests(unittest.TestCase):
             check=False,
         )
 
-    def test_help_lists_three_commands(self) -> None:
+    def test_help_lists_lifecycle_commands(self) -> None:
         result = self.run_cli("--help")
         self.assertEqual(0, result.returncode)
         self.assertIn("checkpoint", result.stdout)
+        self.assertIn("pause", result.stdout)
         self.assertIn("validate", result.stdout)
         self.assertIn("complete", result.stdout)
 
@@ -62,7 +63,7 @@ Run completion.
 - Local only.
 """
         completed = draft.replace("Status: in-progress", "Status: completed").replace(
-            "Run completion.", "你目前不需要做任何事。"
+            "Run completion.", "Read HANDOFF.md before starting any follow-up task."
         )
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
@@ -100,6 +101,54 @@ Run completion.
             report = self.run_cli("compliance", cwd=repo)
             self.assertEqual(0, report.returncode)
             self.assertEqual({"attempts": 1, "rate": 1.0, "valid": 1}, json.loads(report.stdout))
+
+    def test_checkpoint_pause_and_resume_flow(self) -> None:
+        draft = """# Task handoff
+Task-ID: cli-pause
+Status: in-progress
+
+## Goal
+Finish all stages.
+## Current state
+This run is ready to hand off.
+## Completed
+- First stage.
+## Verification
+- First-stage tests passed.
+## Remaining
+- Second stage.
+## Next action
+Read HANDOFF.md and implement the second stage.
+## Constraints
+- Do not archive plans while paused.
+"""
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+            (repo / "tracked").write_text("x", encoding="utf-8")
+            subprocess.run(["git", "add", "tracked"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "init"], cwd=repo, check=True)
+            draft_path = repo / ".ai/draft.md"
+            draft_path.parent.mkdir()
+            draft_path.write_text(draft, encoding="utf-8")
+
+            checkpoint = self.run_cli(
+                "checkpoint", "--task-id", "cli-pause", "--input", str(draft_path), cwd=repo
+            )
+            paused = self.run_cli(
+                "pause", "--task-id", "cli-pause", "--input", str(draft_path), cwd=repo
+            )
+            resumed = self.run_cli(
+                "checkpoint", "--task-id", "cli-pause", "--input", str(draft_path), cwd=repo
+            )
+
+            self.assertEqual(0, checkpoint.returncode, checkpoint.stdout)
+            self.assertEqual("paused", json.loads(paused.stdout)["code"])
+            self.assertEqual(0, paused.returncode, paused.stdout)
+            self.assertEqual("checkpoint_valid", json.loads(resumed.stdout)["code"])
+            self.assertEqual(0, resumed.returncode, resumed.stdout)
 
     def test_validation_error_is_structured_and_does_not_echo_secret(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

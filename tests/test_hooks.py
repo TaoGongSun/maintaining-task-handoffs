@@ -70,6 +70,7 @@ class HookContractTests(unittest.TestCase):
         self.checkpoint()
         first = json.loads(self.call("Stop", stop_hook_active=False).stdout)
         self.assertEqual("block", first["decision"])
+        self.assertIn("handoff pause", first["reason"])
         self.assertIn("handoff complete", first["reason"])
         repeated = json.loads(self.call("Stop", stop_hook_active=True).stdout)
         self.assertFalse(repeated["continue"])
@@ -77,6 +78,16 @@ class HookContractTests(unittest.TestCase):
         report = HandoffService(self.repo).compliance()
         self.assertEqual(2, report["attempts"])
         self.assertEqual(0, report["valid"])
+
+    def test_stop_allows_a_deliberately_paused_task(self) -> None:
+        service = self.checkpoint()
+        draft = BASE_DRAFT.replace("task-123", "hook-task").format(status="in-progress")
+        service.pause("hook-task", draft, "test", 30)
+
+        result = self.call("Stop", stop_hook_active=False)
+
+        self.assertEqual({}, json.loads(result.stdout))
+        self.assertEqual("paused", HandoffService(self.repo)._state()["phase"])
 
     def test_session_end_records_unfinished_task_but_does_not_claim_repair(self) -> None:
         self.checkpoint()

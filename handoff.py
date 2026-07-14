@@ -14,7 +14,7 @@ from handoff_core.service import HandoffService
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(prog="handoff")
     commands = result.add_subparsers(dest="command", required=True)
-    for name in ("checkpoint", "complete"):
+    for name in ("checkpoint", "pause", "complete"):
         command = commands.add_parser(name)
         command.add_argument("--task-id", required=True)
         command.add_argument("--input", required=True, type=Path)
@@ -38,6 +38,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "checkpoint":
             result = service.checkpoint(
+                args.task_id,
+                args.input.read_text(encoding="utf-8"),
+                args.harness,
+                args.fresh_minutes,
+            )
+        elif args.command == "pause":
+            result = service.pause(
                 args.task_id,
                 args.input.read_text(encoding="utf-8"),
                 args.harness,

@@ -31,7 +31,7 @@ def make_repo(root: Path) -> Path:
 
 
 def draft(task_id: str, status: str, plans: list[str]) -> str:
-    action = "你目前不需要做任何事。" if status == "completed" else "繼續實作。"
+    action = "檢查交接文件並決定下一個具體動作。" if status == "completed" else "繼續實作。"
     plan_section = ""
     if plans:
         plan_section = "\n## Plan files\n" + "\n".join(f"- {item}" for item in plans) + "\n"
@@ -94,6 +94,18 @@ class PlanArchivalTests(unittest.TestCase):
         self.assertFalse(listed.exists())
         self.assertEqual("listed\n", (self.root / "docs/feature/archive/2026/plan.md").read_text())
         self.assertEqual("unlisted\n", unlisted.read_text())
+
+    def test_pause_preserves_listed_plan(self) -> None:
+        listed = self.write("docs/feature/plan.md", "listed\n")
+        self.activate("paused-task", ["docs/feature/plan.md"])
+
+        result = self.service.pause(
+            "paused-task", draft("paused-task", "in-progress", ["docs/feature/plan.md"]), "test", 30
+        )
+
+        self.assertTrue(result.ok)
+        self.assertTrue(listed.exists())
+        self.assertFalse((self.root / "docs/feature/archive/2026/plan.md").exists())
 
     def test_ai_plan_uses_ai_archive_and_preserves_subdirectories(self) -> None:
         self.write(".ai/plans/feature/plan.md")

@@ -26,6 +26,7 @@ class SkillContractTests(unittest.TestCase):
         text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("soft", text.lower())
         self.assertIn("handoff checkpoint", text)
+        self.assertIn("handoff pause", text)
         self.assertIn("PreCompact", text)
         self.assertIn("handoff complete", text)
         self.assertIn("Short tasks", text)
@@ -35,12 +36,19 @@ class SkillContractTests(unittest.TestCase):
     def test_adapter_requires_cli_after_activation(self) -> None:
         text = (ROOT / "adapters/trigger-block.md").read_text(encoding="utf-8")
         self.assertIn("handoff checkpoint", text)
+        self.assertIn("handoff pause", text)
         self.assertIn("handoff complete", text)
         self.assertIn("Do not activate", text)
         self.assert_event_based_checkpoint_contract(text)
         self.assertIn("list only those plans under `## Plan files`", text)
         self.assertIn("archive only the listed plans", text)
         self.assertIn("Never scan directories for unrelated plans", text)
+
+    def test_skill_requires_status_and_concrete_next_action_in_final_chat(self) -> None:
+        text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("狀況：<one concise status>", text)
+        self.assertIn("下一步：<one concrete action>", text)
+        self.assertNotIn("你目前不需要做任何事。", text)
 
     def test_readme_documents_bounded_context_contract_bilingually(self) -> None:
         text = (ROOT / "README.md").read_text(encoding="utf-8")

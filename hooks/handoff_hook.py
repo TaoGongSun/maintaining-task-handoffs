@@ -81,8 +81,8 @@ def main() -> int:
                 {
                     "continue": False,
                     "stopReason": (
-                        "Blocked failure: the active long task still lacks a completed, valid "
-                        "HANDOFF. The task is not marked completed; stopping hook continuation "
+                        "Blocked failure: the active long task still lacks a valid pause or completion. "
+                        "The task lifecycle is still active; stopping hook continuation "
                         "to avoid an infinite loop."
                     ),
                 }
@@ -92,8 +92,10 @@ def main() -> int:
                 {
                     "decision": "block",
                     "reason": (
-                        f"Complete the semantic HANDOFF draft, then run handoff complete --task-id {task_id} "
-                        f"--input <draft>.md --harness {args.harness}."
+                        f"If the goal continues in a later run, author an in-progress or blocked HANDOFF and run "
+                        f"handoff pause --task-id {task_id} --input <draft>.md --harness {args.harness}. "
+                        f"Only if the whole goal is finished, use Status: completed and run handoff complete "
+                        f"--task-id {task_id} --input <draft>.md --harness {args.harness}."
                     ),
                 }
             )

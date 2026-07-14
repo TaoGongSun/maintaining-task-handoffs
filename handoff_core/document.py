@@ -116,10 +116,7 @@ def parse_draft(text: str, expected_task_id: str) -> Draft:
     action = action_lines[0].removeprefix("- ").strip()
     if action.casefold().rstrip(".。") in PLACEHOLDERS:
         raise DocumentError("next_action_placeholder")
-    status = status_match.group(1)
-    if status == "completed" and action != "你目前不需要做任何事。":
-        raise DocumentError("completed_next_action")
-    draft = Draft(task_match.group(1), status, sections)
+    draft = Draft(task_match.group(1), status_match.group(1), sections)
     draft.plan_files
     return draft
 

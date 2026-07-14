@@ -9,11 +9,11 @@ Keep one current, local-only handoff at `<git-root>/.ai/HANDOFF.md`.
 
 ## Activation is soft
 
-Use judgment to mark work as long. Short tasks and unrelated small tasks do not activate this workflow. Once activated, the gates below are mandatory until `handoff complete` succeeds.
+Use judgment to mark work as long. Short tasks and unrelated small tasks do not activate this workflow. Once activated, the gates below are mandatory until `handoff pause` or `handoff complete` succeeds.
 
 ## Semantic draft
 
-Write the meaning yourself. The CLI validates but never invents Goal, Current state, Completed, Verification, Remaining, Next action, or Constraints. Use one non-placeholder line for Next action. For completed work use exactly `你目前不需要做任何事。`
+Write the meaning yourself. The CLI validates but never invents Goal, Current state, Completed, Verification, Remaining, Next action, or Constraints. Use one concrete, non-placeholder line for Next action, including after completed work. `completed` means the whole stated Goal is complete, not merely that the current run ended.
 
 The draft must contain `# Task handoff`, `Task-ID`, `Status`, and those seven `##` sections. Never include secrets.
 
@@ -27,11 +27,17 @@ If the current task has plan documents, add an optional `## Plan files` section 
 
 2. During active work, write another checkpoint only at a recovery boundary: before compaction when validation is stale; when work pauses or becomes blocked; or after a milestone whose loss would require material reconstruction. Ordinary edits and test runs do not independently require checkpoint rewrites. A configured `PreCompact` hook blocks stale active tasks.
 
-3. Before finishing, author a completed draft and run:
+3. Before finishing the current run, choose the lifecycle outcome that matches the Goal:
 
-   `handoff complete --task-id <id> --input <draft> --harness <harness>`
+   - If work remains for a later run, keep `Status: in-progress` or `Status: blocked` and run:
 
-   Completion archives only files explicitly listed under the current HANDOFF's `## Plan files`. General plans move to a sibling `archive/<year>/` directory. Plans under `.ai/plans/` move to `.ai/archive/plans/<year>/`. Checkpoint, blocked, and unfinished states never archive plans. Invalid sources or destinations and any archival failure block completion; multi-file archival is all-or-nothing.
+     `handoff pause --task-id <id> --input <draft> --harness <harness>`
+
+   - Only when the whole Goal is complete, use `Status: completed` and run:
+
+     `handoff complete --task-id <id> --input <draft> --harness <harness>`
+
+   Pause preserves all plan files. Completion archives only files explicitly listed under the current HANDOFF's `## Plan files`. General plans move to a sibling `archive/<year>/` directory. Plans under `.ai/plans/` move to `.ai/archive/plans/<year>/`. Checkpoint, paused, blocked, and unfinished states never archive plans. Invalid sources or destinations and any archival failure block completion; multi-file archival is all-or-nothing.
 
 If hooks are unavailable or untrusted, run these commands manually and report that enforcement was degraded. Hook errors are observable under `.ai/`; do not describe a failed hook as successful.
 
@@ -39,11 +45,10 @@ Hooks and session-end handlers cannot guarantee a checkpoint after SIGKILL, powe
 
 ## Final response
 
-After a long-task checkpoint, respond with only:
+After writing a long-task handoff, respond with only:
 
 ```text
 交接文件已更新：<path>
-下一步：<one action>
+狀況：<one concise status>
+下一步：<one concrete action>
 ```
-
-When completed, the last line is `你目前不需要做任何事。`
