@@ -43,6 +43,15 @@
 
 這不是「把聊天貼上再總結一次」，而是長任務的**狀態檢查點契約**。
 
+### 這版新增什麼
+
+這次更新把 skill 從「長任務交接」擴展成更完整的本機工作記憶：
+
+- **本機專案待辦**：用 `handoff task ...` 在 `.ai/` 保存未完成工作、里程碑與每日活動紀錄，不進產品 Git。
+- **跨專案私人記憶**：可選擇把多個專案的待辦與活動同步到使用者自己的私人 Git 記憶庫，方便查「所有專案」或跨專案日期紀錄。
+- **更明確的安全邊界**：同步前檢查 Git 狀態、內容雜湊、秘密與 symlink；雙邊都有變更時停止，不自動覆蓋、force、rebase 或 merge。
+- **安裝更保守**：installer 更新 managed adapter 和本 skill 自己的 hooks，但保留既有規則與無關 hooks，例如本機通知或聲音提醒。
+
 ### 本機專案待辦
 
 除了長任務 handoff，同一個 repository 也可在 `.ai/` 持久管理**未完成待辦**。待辦與 handoff 使用各自生命週期，可共用 task ID 作為軟連結，但不會互相自動建立或自動完成。
@@ -276,6 +285,15 @@ The filename is `HANDOFF` because the document is for the *next* agent or sessio
 | Purpose | Current **resumable state** | Carry a shortened transcript elsewhere |
 
 Not “summarize the whole chat again”—a **checkpoint contract** for long work.
+
+### What changed in this release
+
+This update expands the skill from long-task handoffs into a broader local work-memory tool:
+
+- **Local project tasks**: `handoff task ...` stores unfinished work, milestones, and daily activity under `.ai/`, excluded from product Git.
+- **Optional private cross-project memory**: sync multiple projects into a user-owned private Git memory repo for explicit “all projects” and cross-project day queries.
+- **Clearer safety boundaries**: sync checks Git state, content hashes, secrets, and symlinks; divergent two-sided changes stop without overwrite, force, rebase, or merge.
+- **Conservative installation**: the installer updates managed adapters and this skill’s own hooks while preserving existing rules and unrelated hooks, including local notifications.
 
 ### Local project tasks
 
