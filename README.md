@@ -43,6 +43,32 @@
 
 這不是「把聊天貼上再總結一次」，而是長任務的**狀態檢查點契約**。
 
+### 本機專案待辦
+
+除了長任務 handoff，同一個 repository 也可在 `.ai/` 持久管理**未完成待辦**。待辦與 handoff 使用各自生命週期，可共用 task ID 作為軟連結，但不會互相自動建立或自動完成。
+
+```text
+.ai/README.md          # 入口連結
+.ai/TASKS.md           # 未完成待辦索引
+.ai/tasks/<task-id>.md # 個別待辦語意文件
+.ai/history/YYYY-MM-DD.md  # milestone／completed 活動紀錄
+.ai/project.json
+.ai/task-state.json
+```
+
+常用命令：
+
+```bash
+handoff task add --task-id <id> --input <draft.md>
+handoff task update --task-id <id> --input <draft.md>
+handoff task milestone --task-id <id> --input <draft.md> --summary "..."
+handoff task complete --task-id <id> --summary "..."
+handoff task list
+handoff task show --task-id <id>
+```
+
+查詢時先讀 `.ai/TASKS.md`；「昨天做了什麼」只讀對應本地日期的 `.ai/history/` 檔。完成項會從活躍索引移除，只在歷史留下一行 milestone 或 completed 摘要。若同 ID handoff 仍為 active／paused／blocked，待辦完成會回報 `handoff_still_open`。預設全部本機、不進產品 Git；**私人 Git 同步屬階段二**，本階段不提供。
+
 ---
 
 ## 安裝
@@ -113,6 +139,14 @@ $HOME/.agents/backups/maintaining-task-handoffs-<timestamp>/
 .ai/handoff-transaction.json
 .ai/designs/
 .ai/plans/
+.ai/README.md
+.ai/TASKS.md
+.ai/tasks/
+.ai/history/
+.ai/project.json
+.ai/task-state.json
+.ai/task-transaction.json
+.ai/memory-sync.json
 ```
 
 進度／交接文件留在磁碟給下一輪讀即可；除非你明確要求，否則**不建議**提交進專案 Git。
@@ -212,6 +246,32 @@ The filename is `HANDOFF` because the document is for the *next* agent or sessio
 
 Not “summarize the whole chat again”—a **checkpoint contract** for long work.
 
+### Local project tasks
+
+Besides long-task handoffs, each repository can also keep **unfinished local project tasks** under `.ai/`. Tasks and handoffs have separate lifecycles; they may share a task ID as a soft link, but neither auto-creates nor auto-completes the other.
+
+```text
+.ai/README.md          # entry links
+.ai/TASKS.md           # unfinished-task index
+.ai/tasks/<task-id>.md # per-task semantic document
+.ai/history/YYYY-MM-DD.md  # milestone / completed activity
+.ai/project.json
+.ai/task-state.json
+```
+
+Common commands:
+
+```bash
+handoff task add --task-id <id> --input <draft.md>
+handoff task update --task-id <id> --input <draft.md>
+handoff task milestone --task-id <id> --input <draft.md> --summary "..."
+handoff task complete --task-id <id> --summary "..."
+handoff task list
+handoff task show --task-id <id>
+```
+
+Queries start at `.ai/TASKS.md`; “what did I do yesterday?” reads only the local-date file under `.ai/history/`. Completed work leaves the active index and remains as one-line milestone or completed history. A same-ID handoff that is still active, paused, or blocked blocks task completion with `handoff_still_open`. Default is local-only and excluded from product Git; **private Git sync is phase two** and is not included here.
+
 ## Install
 
 ### A. Skill only
@@ -280,6 +340,14 @@ Install adds these **once** to your Git global excludes (`core.excludesFile`, or
 .ai/handoff-transaction.json
 .ai/designs/
 .ai/plans/
+.ai/README.md
+.ai/TASKS.md
+.ai/tasks/
+.ai/history/
+.ai/project.json
+.ai/task-state.json
+.ai/task-transaction.json
+.ai/memory-sync.json
 ```
 
 Keep the progress/handoff file on disk for the next session. Do not commit it unless the user explicitly asks.

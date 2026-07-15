@@ -158,7 +158,24 @@ ensure_git_excludes() {
 
   backup_file "$excludes"
   local line
-  for line in '.ai/HANDOFF.md' '.ai/handoffs/' '.ai/handoff-state.json' '.ai/handoff-metrics.jsonl' '.ai/handoff-hook-errors.jsonl' '.ai/handoff-transaction.json' '.ai/designs/' '.ai/plans/'; do
+  for line in \
+    '.ai/HANDOFF.md' \
+    '.ai/handoffs/' \
+    '.ai/handoff-state.json' \
+    '.ai/handoff-metrics.jsonl' \
+    '.ai/handoff-hook-errors.jsonl' \
+    '.ai/handoff-transaction.json' \
+    '.ai/designs/' \
+    '.ai/plans/' \
+    '.ai/README.md' \
+    '.ai/TASKS.md' \
+    '.ai/tasks/' \
+    '.ai/history/' \
+    '.ai/project.json' \
+    '.ai/task-state.json' \
+    '.ai/task-transaction.json' \
+    '.ai/memory-sync.json'
+  do
     if [[ -f "$excludes" ]] && grep -qxF "$line" "$excludes" 2>/dev/null; then
       echo "Ignore already present (skip): $line"
       continue

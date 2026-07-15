@@ -43,6 +43,37 @@ If hooks are unavailable or untrusted, run these commands manually and report th
 
 Hooks and session-end handlers cannot guarantee a checkpoint after SIGKILL, power loss, or host failure. Earlier checkpoints reduce loss; they do not eliminate it.
 
+## Project tasks
+
+Local project todos are independent of long-task handoffs and live under the same `.ai/` tree:
+
+- Entry: `.ai/README.md`
+- Unfinished index: `.ai/TASKS.md`
+- Task documents: `.ai/tasks/<task-id>.md`
+- Daily activity: `.ai/history/YYYY-MM-DD.md`
+
+### Query routing
+
+- Current-project task questions read `.ai/TASKS.md` first.
+- A named task follows exactly one index link into `.ai/tasks/<task-id>.md`. If multiple matches appear, list them and stop; do not guess.
+- “Yesterday” (or another local day) reads only the configured local date file under `.ai/history/`.
+- Long-task handoff activation remains independent; do not invent a project task just because a handoff exists.
+
+### Mutations
+
+Author semantic drafts yourself. Mutate only through CLI commands; do not hand-edit generated indexes or registry files:
+
+```text
+handoff task add --task-id <id> --input <draft>
+handoff task update --task-id <id> --input <draft>
+handoff task milestone --task-id <id> --input <draft> --summary <one line>
+handoff task complete --task-id <id> --summary <one line>
+handoff task list
+handoff task show --task-id <id>
+```
+
+Completion requires evidence that the whole task goal is done, then `handoff task complete`. Inactivity, a clean Git tree, or a likely commit never imply completion. If a same-ID handoff is still open (active, paused, or blocked), complete or pause that handoff first.
+
 ## Final response
 
 After a checkpoint or pause, report the task-document path. After completion, report `<repo>/.ai/HANDOFF.md` because the completed task document has been removed. Respond with only:

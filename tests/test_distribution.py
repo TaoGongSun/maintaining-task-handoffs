@@ -79,8 +79,31 @@ class SkillContractTests(unittest.TestCase):
             "only one task may be active",
             "完成後會刪除該任務文件",
             "completion deletes that task document",
+            ".ai/TASKS.md",
+            ".ai/tasks/",
+            ".ai/history/",
+            "handoff task",
+            "milestone",
+            "completed",
+            "handoff_still_open",
+            "本機專案待辦",
+            "local project tasks",
+            "私人 Git 同步屬階段二",
+            "private Git sync is phase two",
+            "同 ID handoff",
+            "same-ID handoff",
         ):
             self.assertIn(phrase.lower(), text.lower())
+
+    def test_task_guidance_routes_bounded_queries(self) -> None:
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        adapter = (ROOT / "adapters/trigger-block.md").read_text(encoding="utf-8")
+        for text in (skill, adapter):
+            self.assertIn(".ai/TASKS.md", text)
+            self.assertIn("handoff task complete", text)
+            self.assertIn("yesterday", text.lower())
+            self.assertIn("multiple matches", text.lower())
+            self.assertIn("do not guess", text.lower())
 
 
 class HookMergeTests(unittest.TestCase):
@@ -235,6 +258,20 @@ class InstallerTests(unittest.TestCase):
             ".ai/handoffs/",
         ):
             self.assertIn(name, installer)
+
+    def test_all_task_runtime_files_are_ignored(self) -> None:
+        installer = (ROOT / "scripts/install.sh").read_text(encoding="utf-8")
+        for path in (
+            ".ai/README.md",
+            ".ai/TASKS.md",
+            ".ai/tasks/",
+            ".ai/history/",
+            ".ai/project.json",
+            ".ai/task-state.json",
+            ".ai/task-transaction.json",
+            ".ai/memory-sync.json",
+        ):
+            self.assertIn(path, installer)
 
 
 if __name__ == "__main__":
