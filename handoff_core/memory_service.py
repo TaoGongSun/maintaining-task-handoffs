@@ -61,6 +61,22 @@ def _read_sync_metadata(project_dir: Path) -> dict[str, object]:
     return {"synced": synced if isinstance(synced, str) else ""}
 
 
+def _reject_existing_symlink(path: Path) -> None:
+    if path.is_symlink():
+        raise DocumentError("snapshot_symlink")
+
+
+def _memory_path(memory_root: Path, relative: str) -> Path:
+    path = memory_root
+    _reject_existing_symlink(path)
+    for part in Path(relative).parts:
+        if part in {"", ".", ".."}:
+            raise DocumentError("invalid_path")
+        path = path / part
+        _reject_existing_symlink(path)
+    return path
+
+
 def _global_task_index(
     entries: list[tuple[str, str, dict[str, object], TaskDraft]],
 ) -> str:
@@ -73,14 +89,6 @@ def _global_task_index(
             for item in entries
             if item[2].get("status") == status
         ]
-        matched.sort(
-            key=lambda item: (
-                item[1],
-                str(item[2].get("updated", "")),
-                item[3].task_id,
-            ),
-            reverse=False,
-        )
         # project name ascending; within same project updated descending then task id
         matched.sort(key=lambda item: item[1])
         by_project: dict[str, list[tuple[str, str, dict[str, object], TaskDraft]]] = {}
@@ -89,10 +97,8 @@ def _global_task_index(
         ordered: list[tuple[str, str, dict[str, object], TaskDraft]] = []
         for name in sorted(by_project):
             group = by_project[name]
-            group.sort(
-                key=lambda item: (str(item[2].get("updated", "")), item[3].task_id),
-                reverse=True,
-            )
+            group.sort(key=lambda item: item[3].task_id)
+            group.sort(key=lambda item: str(item[2].get("updated", "")), reverse=True)
             ordered.extend(group)
         if not ordered:
             lines.append("- None.")
@@ -316,9 +322,7 @@ class MemoryService:
         manifest_path = memory_root / ".memory-transaction.json"
         snapshots: dict[str, str | None] = {}
         for relative in desired:
-            path = memory_root / relative
-            if path.is_symlink():
-                raise DocumentError("snapshot_symlink")
+            path = _memory_path(memory_root, relative)
             if path.is_file():
                 snapshots[relative] = path.read_text(encoding="utf-8")
             else:
@@ -326,14 +330,14 @@ class MemoryService:
         write_json(manifest_path, {"version": 1, "files": desired})
         try:
             for relative, content in desired.items():
-                path = memory_root / relative
+                path = _memory_path(memory_root, relative)
                 if content is None:
                     path.unlink(missing_ok=True)
                 else:
                     write_text(path, content)
         except Exception:
             for relative, content in snapshots.items():
-                path = memory_root / relative
+                path = _memory_path(memory_root, relative)
                 if content is None:
                     path.unlink(missing_ok=True)
                 else:
@@ -370,8 +374,9 @@ class MemoryService:
             )
 
             mirror = Path(staged) / "mirror"
-            if (memory_root / "projects").is_dir():
-                shutil.copytree(memory_root / "projects", mirror / "projects")
+            projects_root = _memory_path(memory_root, "projects")
+            if projects_root.is_dir():
+                shutil.copytree(projects_root, mirror / "projects", symlinks=True)
             else:
                 (mirror / "projects").mkdir(parents=True)
             target_project = mirror / "projects" / project_id
@@ -384,17 +389,17 @@ class MemoryService:
             for relative, content in views.items():
                 desired[relative] = content
 
-            history_dir = memory_root / "history"
+            history_dir = _memory_path(memory_root, "history")
             if history_dir.is_dir():
                 for path in history_dir.glob("*.md"):
                     key = f"history/{path.name}"
                     if key not in desired:
                         desired[key] = None
 
-            existing_project = memory_root / "projects" / project_id
+            existing_project = _memory_path(memory_root, project_prefix)
             if existing_project.is_dir():
                 for sub in ("tasks", "history"):
-                    directory = existing_project / sub
+                    directory = _memory_path(memory_root, f"{project_prefix}/{sub}")
                     if directory.is_dir():
                         for path in directory.glob("*"):
                             key = f"{project_prefix}/{sub}/{path.name}"

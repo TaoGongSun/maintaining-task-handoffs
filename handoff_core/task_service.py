@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .activity import ActivityEvent, merge_event, parse_activity, render_activity
 from .atomic import write_json, write_text
-from .document import DocumentError, scan_secrets, validate_task_id
+from .document import DocumentError, legacy_handoff_identity, scan_secrets, validate_task_id
 from .git import repo_root
 from .project import load_or_create_project
 from .task_document import TaskDraft, parse_task_draft, render_task, render_task_index
@@ -391,6 +391,12 @@ class TaskService:
             entry = handoff_tasks.get(task_id)
             if isinstance(entry, dict) and entry.get("status") in {"in-progress", "blocked"}:
                 raise DocumentError("handoff_still_open")
+        elif (handoff_text := self._read_text(self.ai / "HANDOFF.md")):
+            identity = legacy_handoff_identity(handoff_text)
+            if identity is not None:
+                handoff_task_id, handoff_status = identity
+                if handoff_task_id == task_id and handoff_status in {"in-progress", "blocked"}:
+                    raise DocumentError("handoff_still_open")
         del tasks[task_id]
         documents = self._load_documents(tasks)
         identity = load_or_create_project(self.root)

@@ -97,6 +97,10 @@ class TaskDocumentTests(unittest.TestCase):
         cases = {
             "invalid_task": TASK_DRAFT.replace("Status: in-progress", "Status: completed"),
             "task_id_mismatch": TASK_DRAFT.replace("Task-ID: project-memory", "Task-ID: other"),
+            "invalid_task_metadata": TASK_DRAFT.replace(
+                "Status: in-progress\n",
+                "Status: in-progress\nCreated: 2026-07-15T09:00:00+08:00\n",
+            ),
             "next_action_count": TASK_DRAFT.replace(
                 "Implement the task parser.", "Implement the parser.\nRun another action."
             ),
@@ -127,6 +131,28 @@ class TaskDocumentTests(unittest.TestCase):
         self.assertIn("## Todo\n- None.", text)
         self.assertIn("## Blocked", text)
         self.assertIn("下一步：Implement the task parser.", text)
+
+    def test_index_sorts_equal_timestamps_by_task_id_ascending(self) -> None:
+        first = parse_task_draft(
+            TASK_DRAFT.replace("project-memory", "alpha-task")
+            .replace("Build project memory", "Alpha task")
+            .replace("Implement the task parser.", "Work on alpha."),
+            "alpha-task",
+        )
+        second = parse_task_draft(
+            TASK_DRAFT.replace("project-memory", "beta-task")
+            .replace("Build project memory", "Beta task")
+            .replace("Implement the task parser.", "Work on beta."),
+            "beta-task",
+        )
+        registry = {
+            "beta-task": {"status": "in-progress", "updated": "2026-07-15T10:00:00+08:00"},
+            "alpha-task": {"status": "in-progress", "updated": "2026-07-15T10:00:00+08:00"},
+        }
+
+        text = render_task_index(registry, {"alpha-task": first, "beta-task": second})
+
+        self.assertLess(text.index("[alpha-task]"), text.index("[beta-task]"))
 
 
 class ProjectAndActivityTests(RepoCase):
@@ -238,6 +264,33 @@ class TaskCompletionTests(RepoCase):
             "test",
             30,
         )
+        with self.assertRaisesRegex(DocumentError, "handoff_still_open"):
+            self.tasks.complete("project-memory", "Local task support shipped.")
+
+    def test_legacy_open_handoff_blocks_task_completion(self) -> None:
+        ai = self.repo / ".ai"
+        ai.mkdir(exist_ok=True)
+        (ai / "HANDOFF.md").write_text(
+            BASE_DRAFT.replace("task-123", "project-memory").format(status="blocked"),
+            encoding="utf-8",
+        )
+        (ai / "handoff-state.json").write_text(
+            json.dumps(
+                {
+                    "phase": "paused",
+                    "task_id": "project-memory",
+                    "updated": "2026-07-11T10:00:00+00:00",
+                    "fresh_minutes": 30,
+                    "harness": "legacy",
+                    "git": {},
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
         with self.assertRaisesRegex(DocumentError, "handoff_still_open"):
             self.tasks.complete("project-memory", "Local task support shipped.")
 

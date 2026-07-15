@@ -27,6 +27,8 @@ def parse_task_draft(text: str, expected_task_id: str) -> TaskDraft:
         raise DocumentError("secret_detected", summary)
     if not text.startswith("# Task\n"):
         raise DocumentError("invalid_task")
+    if re.search(r"^(?:Created|Updated):\s*", text, re.MULTILINE):
+        raise DocumentError("invalid_task_metadata")
     task_match = re.search(r"^Task-ID:\s*(\S+)\s*$", text, re.MULTILINE)
     title_match = re.search(r"^Title:\s*(.+?)\s*$", text, re.MULTILINE)
     status_match = re.search(r"^Status:\s*(todo|in-progress|blocked)\s*$", text, re.MULTILINE)
@@ -82,11 +84,8 @@ def render_task_index(
     lines = ["# Project tasks", ""]
     for status, heading in labels:
         lines.append(f"## {heading}")
-        task_ids = sorted(
-            (task_id for task_id, entry in tasks.items() if entry["status"] == status),
-            key=lambda task_id: (str(tasks[task_id]["updated"]), task_id),
-            reverse=True,
-        )
+        task_ids = sorted(task_id for task_id, entry in tasks.items() if entry["status"] == status)
+        task_ids.sort(key=lambda task_id: str(tasks[task_id]["updated"]), reverse=True)
         if not task_ids:
             lines.append("- None.")
         else:

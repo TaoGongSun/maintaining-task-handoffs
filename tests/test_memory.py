@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -197,6 +198,33 @@ class MemoryAggregationTests(unittest.TestCase):
         with self.assertRaisesRegex(DocumentError, "history_conflict"):
             rebuild_memory_views(make_conflicting_history_fixture())
 
+    def test_global_index_sorts_equal_timestamps_by_task_id_ascending(self) -> None:
+        from handoff_core.memory_service import _global_task_index
+        from handoff_core.task_document import parse_task_draft
+
+        first = parse_task_draft(
+            TASK_DRAFT.replace("project-memory", "alpha-task")
+            .replace("Build project memory", "Alpha task")
+            .replace("Implement the task parser.", "Work on alpha."),
+            "alpha-task",
+        )
+        second = parse_task_draft(
+            TASK_DRAFT.replace("project-memory", "beta-task")
+            .replace("Build project memory", "Beta task")
+            .replace("Implement the task parser.", "Work on beta."),
+            "beta-task",
+        )
+        entry = {"status": "in-progress", "updated": "2026-07-15T10:00:00+08:00"}
+
+        text = _global_task_index(
+            [
+                ("project-one", "Project", entry, second),
+                ("project-one", "Project", entry, first),
+            ]
+        )
+
+        self.assertLess(text.index("project-one/alpha-task"), text.index("project-one/beta-task"))
+
 
 class MemoryConfigurationTests(TaskRepoCase):
     def setUp(self) -> None:
@@ -304,6 +332,50 @@ class MemorySyncTests(TaskRepoCase):
         self.assertEqual(
             memory_before, load_memory_project_snapshot(self.memory, self.project_id).digest
         )
+
+    def test_sync_rejects_symlinked_projects_directory(self) -> None:
+        self.tasks.add("project-memory", TASK_DRAFT)
+        outside = self.repo / "outside-projects"
+        outside.mkdir()
+        (self.memory / "projects").symlink_to(outside, target_is_directory=True)
+        commit_all(self.memory, "add symlinked projects")
+
+        with self.assertRaisesRegex(DocumentError, "snapshot_symlink"):
+            self.service.sync(push=False)
+
+    def test_sync_rejects_symlinked_project_directory(self) -> None:
+        self.tasks.add("project-memory", TASK_DRAFT)
+        self.service.sync(push=False)
+        original = self.memory / "projects" / self.project_id
+        outside = self.repo / "outside-project"
+        shutil.copytree(original, outside)
+        shutil.rmtree(original)
+        original.symlink_to(outside, target_is_directory=True)
+        commit_all(self.memory, "replace project with symlink")
+        self.tasks.update(
+            "project-memory",
+            TASK_DRAFT.replace("Implement the task parser.", "Implement the upload guard."),
+        )
+
+        with self.assertRaisesRegex(DocumentError, "snapshot_symlink"):
+            self.service.sync(push=False)
+
+    def test_sync_rejects_symlinked_memory_task_file(self) -> None:
+        self.tasks.add("project-memory", TASK_DRAFT)
+        self.service.sync(push=False)
+        task = self.memory / "projects" / self.project_id / "tasks" / "project-memory.md"
+        outside = self.repo / "outside-task.md"
+        outside.write_text(task.read_text(encoding="utf-8"), encoding="utf-8")
+        task.unlink()
+        task.symlink_to(outside)
+        commit_all(self.memory, "replace task with symlink")
+        self.tasks.update(
+            "project-memory",
+            TASK_DRAFT.replace("Implement the task parser.", "Implement the task guard."),
+        )
+
+        with self.assertRaisesRegex(DocumentError, "snapshot_symlink"):
+            self.service.sync(push=False)
 
 
 
