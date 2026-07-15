@@ -441,6 +441,13 @@ class MemoryService:
             },
         )
 
+    def _ensure_local_snapshot_ready(self) -> None:
+        identity = load_or_create_project(self.root)
+        state_path = self.root / ".ai" / "task-state.json"
+        if not state_path.is_file():
+            write_json(state_path, {"version": 1, "tasks": {}})
+        _ = identity
+
     def sync(self, push: bool = True) -> MemoryResult:
         config = self._load_config()
         git = self._require_git_repo(config.memory_path)
@@ -452,6 +459,7 @@ class MemoryService:
             raise DocumentError("invalid_transaction")
 
         self._preflight(git)
+        self._ensure_local_snapshot_ready()
         local = load_snapshot(self.root)
         if local.project_id != project_id:
             raise DocumentError("invalid_project")
@@ -459,7 +467,18 @@ class MemoryService:
         base = self._load_base(project_id)
         base_hash = str(base["base_hash"]) if base is not None else None
         memory_hash = memory.digest if memory is not None else None
-        direction = sync_direction(local.digest, memory_hash, base_hash)
+        local_tasks = json.loads(local.files["task-state.json"].decode("utf-8")).get("tasks", {})
+        if (
+            base_hash is None
+            and memory_hash is not None
+            and local.digest != memory_hash
+            and isinstance(local_tasks, dict)
+            and not local_tasks
+        ):
+            # New device with empty local tasks may bootstrap from memory.
+            direction = "download"
+        else:
+            direction = sync_direction(local.digest, memory_hash, base_hash)
 
         if direction == "current":
             head = git.head()

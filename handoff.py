@@ -8,6 +8,7 @@ from pathlib import Path
 
 from handoff_core.document import DocumentError
 from handoff_core.git import NotGitRepoError, repo_root
+from handoff_core.memory_service import MemoryService
 from handoff_core.service import HandoffService
 from handoff_core.task_service import TaskService
 
@@ -57,6 +58,14 @@ def parser() -> argparse.ArgumentParser:
     task_show.add_argument("--task-id", required=True)
     task_show.add_argument("--timezone")
 
+    memory = commands.add_parser("memory")
+    memory_commands = memory.add_subparsers(dest="memory_command", required=True)
+    memory_init = memory_commands.add_parser("init")
+    memory_init.add_argument("--path", required=True, type=Path)
+    memory_commands.add_parser("status")
+    memory_sync = memory_commands.add_parser("sync")
+    memory_sync.add_argument("--no-push", action="store_true")
+
     return result
 
 
@@ -96,6 +105,17 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             print(service.show(args.task_id), end="")
             return 0
+
+        if args.command == "memory":
+            service = MemoryService(root)
+            if args.memory_command == "init":
+                result = service.init(args.path)
+            elif args.memory_command == "status":
+                result = service.status()
+            else:
+                result = service.sync(push=not args.no_push)
+            print(json.dumps(result.to_dict(), sort_keys=True))
+            return 0 if result.ok else 4
 
         service = HandoffService(root)
         if args.command == "checkpoint":

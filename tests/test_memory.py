@@ -217,7 +217,7 @@ class MemoryConfigurationTests(TaskRepoCase):
         self.assertEqual(str(self.memory.resolve()), config["memory_path"])
 
     def test_init_rejects_non_git_directory(self) -> None:
-        plain = self.repo.parent / "plain"
+        plain = self.repo / "plain"
         plain.mkdir()
         with self.assertRaisesRegex(DocumentError, "memory_not_git_repo"):
             self.service.init(plain)
