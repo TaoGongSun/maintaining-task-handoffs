@@ -5,7 +5,7 @@ description: Use when work has a formal plan, three or more substantive steps, m
 
 # Maintaining Task Handoffs
 
-Keep one current, local-only handoff at `<git-root>/.ai/HANDOFF.md`.
+Keep local-only handoffs under `<git-root>/.ai/`. `.ai/HANDOFF.md` is the unfinished-task index, while each task's semantic handoff lives at `.ai/handoffs/<task-id>.md`. A repository may have one active task and multiple paused or blocked tasks.
 
 ## Activation is soft
 
@@ -37,7 +37,7 @@ If the current task has plan documents, add an optional `## Plan files` section 
 
      `handoff complete --task-id <id> --input <draft> --harness <harness>`
 
-   Pause preserves all plan files. Completion archives only files explicitly listed under the current HANDOFF's `## Plan files`. General plans move to a sibling `archive/<year>/` directory. Plans under `.ai/plans/` move to `.ai/archive/plans/<year>/`. Checkpoint, paused, blocked, and unfinished states never archive plans. Invalid sources or destinations and any archival failure block completion; multi-file archival is all-or-nothing.
+   Pause preserves the task document and all plan files. Completion removes that task document and its index entry, then archives only files explicitly listed under that task handoff's `## Plan files`. Other paused or blocked tasks remain untouched. General plans move to a sibling `archive/<year>/` directory. Plans under `.ai/plans/` move to `.ai/archive/plans/<year>/`. Checkpoint, paused, blocked, and unfinished states never archive plans. Invalid sources or destinations and any archival failure block completion; cleanup and multi-file archival are all-or-nothing.
 
 If hooks are unavailable or untrusted, run these commands manually and report that enforcement was degraded. Hook errors are observable under `.ai/`; do not describe a failed hook as successful.
 
@@ -45,10 +45,10 @@ Hooks and session-end handlers cannot guarantee a checkpoint after SIGKILL, powe
 
 ## Final response
 
-After writing a long-task handoff, respond with only:
+After a checkpoint or pause, report the task-document path. After completion, report `<repo>/.ai/HANDOFF.md` because the completed task document has been removed. Respond with only:
 
 ```text
-交接文件已更新：<path>
+交接文件已更新：<task-document-or-index-path>
 狀況：<one concise status>
 下一步：<one concrete action>
 ```

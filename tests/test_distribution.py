@@ -33,6 +33,14 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("cannot guarantee", text)
         self.assert_event_based_checkpoint_contract(text)
 
+    def test_skill_documents_index_and_per_task_lifecycle(self) -> None:
+        text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("`.ai/HANDOFF.md` is the unfinished-task index", text)
+        self.assertIn("`.ai/handoffs/<task-id>.md`", text)
+        self.assertIn("one active task", text.lower())
+        self.assertIn("multiple paused or blocked tasks", text.lower())
+        self.assertIn("removes that task document", text.lower())
+
     def test_adapter_requires_cli_after_activation(self) -> None:
         text = (ROOT / "adapters/trigger-block.md").read_text(encoding="utf-8")
         self.assertIn("handoff checkpoint", text)
@@ -43,11 +51,15 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("list only those plans under `## Plan files`", text)
         self.assertIn("archive only the listed plans", text)
         self.assertIn("Never scan directories for unrelated plans", text)
+        self.assertIn("`.ai/HANDOFF.md` as an index", text)
+        self.assertIn("`.ai/handoffs/<task-id>.md`", text)
 
     def test_skill_requires_status_and_concrete_next_action_in_final_chat(self) -> None:
         text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("狀況：<one concise status>", text)
         self.assertIn("下一步：<one concrete action>", text)
+        self.assertIn("checkpoint or pause, report the task-document path", text)
+        self.assertIn("after completion, report `<repo>/.ai/handoff.md`", text.lower())
         self.assertNotIn("你目前不需要做任何事。", text)
 
     def test_readme_documents_bounded_context_contract_bilingually(self) -> None:
@@ -61,6 +73,12 @@ class SkillContractTests(unittest.TestCase):
             "does not inject HANDOFF contents into model context",
             "一般編輯與測試不會各自觸發 checkpoint",
             "ordinary edits and tests do not independently trigger checkpoints",
+            "`.ai/HANDOFF.md` 是未完成任務索引",
+            "`.ai/HANDOFF.md` is the unfinished-task index",
+            "同時只允許一個 active 任務",
+            "only one task may be active",
+            "完成後會刪除該任務文件",
+            "completion deletes that task document",
         ):
             self.assertIn(phrase.lower(), text.lower())
 
@@ -187,6 +205,7 @@ class InstallerTests(unittest.TestCase):
             ".ai/handoff-metrics.jsonl",
             ".ai/handoff-hook-errors.jsonl",
             ".ai/handoff-transaction.json",
+            ".ai/handoffs/",
         ):
             self.assertIn(name, installer)
 

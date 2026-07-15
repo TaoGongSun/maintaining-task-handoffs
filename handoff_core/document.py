@@ -16,6 +16,7 @@ REQUIRED_SECTIONS = (
 PLAN_FILES_SECTION = "Plan files"
 PLACEHOLDERS = {"tbd", "todo", "none", "n/a", "unknown", "later", "-"}
 MAX_DRAFT_BYTES = 8 * 1024
+TASK_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 class DocumentError(ValueError):
@@ -82,7 +83,57 @@ def scan_secrets(text: str) -> list[SecretFinding]:
     return findings
 
 
+def validate_task_id(task_id: str) -> None:
+    if not TASK_ID_PATTERN.fullmatch(task_id) or task_id in {".", ".."}:
+        raise DocumentError("unsafe_task_id")
+
+
+def legacy_handoff_identity(text: str) -> tuple[str, str] | None:
+    """Return a preservable legacy task identity without requiring a valid draft."""
+    if not text.startswith("# Task handoff\n"):
+        return None
+    task_match = re.search(r"^Task-ID:\s*(\S+)\s*$", text, re.MULTILINE)
+    status_match = re.search(r"^Status:\s*([^\n]+)\s*$", text, re.MULTILINE)
+    if not task_match or not status_match:
+        return None
+    task_id = task_match.group(1)
+    validate_task_id(task_id)
+    status_text = status_match.group(1).strip().casefold()
+    if status_text.startswith("completed"):
+        return task_id, "completed"
+    return task_id, "blocked" if status_text.startswith("blocked") else "in-progress"
+
+
+def render_index(tasks: dict[str, dict[str, object]], active_task_id: str | None) -> str:
+    lines = [
+        "# Task handoffs",
+        "",
+        "Unfinished long-task handoffs tracked in this repository.",
+        "",
+        "## Active",
+    ]
+    if active_task_id is None:
+        lines.append("- None.")
+    else:
+        entry = tasks[active_task_id]
+        lines.append(
+            f"- [{active_task_id}](handoffs/{active_task_id}.md) — {entry['status']}"
+        )
+    lines.extend(("", "## Paused or blocked"))
+    paused = sorted(task_id for task_id in tasks if task_id != active_task_id)
+    if not paused:
+        lines.append("- None.")
+    else:
+        for task_id in paused:
+            entry = tasks[task_id]
+            lines.append(
+                f"- [{task_id}](handoffs/{task_id}.md) — {entry['phase']} / {entry['status']}"
+            )
+    return "\n".join(lines) + "\n"
+
+
 def parse_draft(text: str, expected_task_id: str) -> Draft:
+    validate_task_id(expected_task_id)
     if len(text.encode("utf-8")) > MAX_DRAFT_BYTES:
         raise DocumentError("handoff_too_large")
     findings = scan_secrets(text)

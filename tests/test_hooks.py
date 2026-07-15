@@ -53,7 +53,9 @@ class HookContractTests(unittest.TestCase):
     def test_precompact_blocks_stale_active_task(self) -> None:
         service = self.checkpoint()
         state = json.loads(service.state_path.read_text(encoding="utf-8"))
-        state["updated"] = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        state["tasks"]["hook-task"]["updated"] = (
+            datetime.now(timezone.utc) - timedelta(hours=1)
+        ).isoformat()
         service.state_path.write_text(json.dumps(state), encoding="utf-8")
         result = self.call("PreCompact", trigger="auto")
         output = json.loads(result.stdout)
@@ -87,7 +89,9 @@ class HookContractTests(unittest.TestCase):
         result = self.call("Stop", stop_hook_active=False)
 
         self.assertEqual({}, json.loads(result.stdout))
-        self.assertEqual("paused", HandoffService(self.repo)._state()["phase"])
+        state = HandoffService(self.repo)._state()
+        self.assertIsNone(state["active_task_id"])
+        self.assertEqual("paused", state["tasks"]["hook-task"]["phase"])
 
     def test_session_end_records_unfinished_task_but_does_not_claim_repair(self) -> None:
         self.checkpoint()

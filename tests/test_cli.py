@@ -96,7 +96,8 @@ Run completion.
             )
             self.assertEqual(0, complete.returncode, complete.stdout)
             handoff = (repo / ".ai/HANDOFF.md").read_text(encoding="utf-8")
-            self.assertIn("- Dirty: true", handoff)
+            self.assertIn("## Active\n- None.", handoff)
+            self.assertFalse((repo / ".ai/handoffs/cli-task.md").exists())
 
             report = self.run_cli("compliance", cwd=repo)
             self.assertEqual(0, report.returncode)

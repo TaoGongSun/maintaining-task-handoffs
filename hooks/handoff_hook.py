@@ -49,13 +49,20 @@ def main() -> int:
         print("hook_repo_error", file=sys.stderr)
         return 2
 
-    active = bool(state and state.get("phase") == "active")
+    if state and state.get("version") == 2:
+        task_id_value = state.get("active_task_id")
+        tasks = state.get("tasks")
+        entry = tasks.get(task_id_value) if isinstance(tasks, dict) and isinstance(task_id_value, str) else None
+        active = isinstance(entry, dict) and entry.get("phase") == "active"
+        task_id = str(task_id_value) if active else ""
+        fresh_minutes = int(entry.get("fresh_minutes", 30)) if active else 30
+    else:
+        active = bool(state and state.get("phase") == "active")
+        task_id = str(state["task_id"]) if active else ""
+        fresh_minutes = int(state.get("fresh_minutes", 30)) if active else 30
     if not active:
         emit({})
         return 0
-
-    task_id = str(state["task_id"])
-    fresh_minutes = int(state.get("fresh_minutes", 30))
     if event == "PreCompact":
         validation = service.validate(task_id, fresh_minutes)
         if validation.ok:

@@ -131,13 +131,14 @@ class PlanArchivalTests(unittest.TestCase):
         plans = ["docs/first.md", "docs/second.md"]
         self.activate("move-failure", plans)
         calls = 0
+        real_replace = os.replace
 
         def fail_second_move(source: Path, destination: Path) -> None:
             nonlocal calls
             calls += 1
             if calls == 2:
                 raise OSError("simulated move failure")
-            os.replace(source, destination)
+            real_replace(source, destination)
 
         with patch("handoff_core.service.os.replace", side_effect=fail_second_move):
             with self.assertRaisesRegex(OSError, "simulated move failure"):
@@ -145,7 +146,9 @@ class PlanArchivalTests(unittest.TestCase):
         self.assertTrue(first.is_file())
         self.assertTrue(second.is_file())
         self.assertFalse((self.root / "docs/archive/2026/first.md").exists())
-        self.assertEqual("active", json.loads(self.service.state_path.read_text())["phase"])
+        state = json.loads(self.service.state_path.read_text())
+        self.assertEqual("move-failure", state["active_task_id"])
+        self.assertEqual("active", state["tasks"]["move-failure"]["phase"])
 
     def test_rejects_outside_absolute_missing_duplicate_and_archived_paths(self) -> None:
         cases = (
@@ -196,7 +199,11 @@ class PlanArchivalTests(unittest.TestCase):
         real_write_json = __import__("handoff_core.service", fromlist=["write_json"]).write_json
 
         def fail_completed_state(path: Path, value: dict) -> None:
-            if path == self.service.state_path and value.get("phase") == "completed":
+            if (
+                path == self.service.state_path
+                and value.get("version") == 2
+                and "rollback" not in value.get("tasks", {})
+            ):
                 raise OSError("simulated state failure")
             real_write_json(path, value)
 
@@ -206,7 +213,8 @@ class PlanArchivalTests(unittest.TestCase):
         self.assertTrue(plan.is_file())
         self.assertFalse((self.root / "docs/archive/2026/plan.md").exists())
         state = json.loads(self.service.state_path.read_text())
-        self.assertEqual("active", state["phase"])
+        self.assertEqual("rollback", state["active_task_id"])
+        self.assertEqual("active", state["tasks"]["rollback"]["phase"])
         self.assertFalse(self.service.transaction_path.exists())
 
 

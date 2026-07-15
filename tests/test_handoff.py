@@ -73,10 +73,12 @@ class LifecycleTests(RepoCase):
 
         self.assertTrue(result.ok)
         self.assertEqual("paused", result.code)
-        self.assertEqual("paused", self.service._state()["phase"])
-        handoff = self.service.handoff.read_text(encoding="utf-8")
-        self.assertIn("Status: in-progress", handoff)
-        self.assertIn("Run the hook contract tests.", handoff)
+        state = self.service._state()
+        self.assertIsNone(state["active_task_id"])
+        self.assertEqual("paused", state["tasks"]["task-123"]["phase"])
+        task_document = self.service._task_path("task-123").read_text(encoding="utf-8")
+        self.assertIn("Status: in-progress", task_document)
+        self.assertIn("Run the hook contract tests.", task_document)
 
     def test_pause_rejects_a_completed_goal(self) -> None:
         self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
@@ -91,7 +93,8 @@ class LifecycleTests(RepoCase):
         result = self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
 
         self.assertTrue(result.ok)
-        self.assertEqual("active", self.service._state()["phase"])
+        self.assertEqual("task-123", self.service._state()["active_task_id"])
+        self.assertEqual("active", self.service._state()["tasks"]["task-123"]["phase"])
 
 
 class DocumentTests(unittest.TestCase):
@@ -195,14 +198,16 @@ class MetadataTests(RepoCase):
 
     def test_tampered_document_metadata_is_invalid(self) -> None:
         self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
-        text = self.service.handoff.read_text(encoding="utf-8")
-        self.service.handoff.write_text(text.replace("- Dirty: false", "- Dirty: true"), encoding="utf-8")
+        target = self.service._task_path("task-123")
+        text = target.read_text(encoding="utf-8")
+        target.write_text(text.replace("- Dirty: false", "- Dirty: true"), encoding="utf-8")
         self.assertEqual("metadata_mismatch", self.service.validate("task-123", fresh_minutes=30).code)
 
     def test_duplicate_contradictory_metadata_is_invalid(self) -> None:
         self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
-        text = self.service.handoff.read_text(encoding="utf-8")
-        self.service.handoff.write_text(
+        target = self.service._task_path("task-123")
+        text = target.read_text(encoding="utf-8")
+        target.write_text(
             text.replace("- Dirty: false", "- Dirty: false\n- Dirty: true"), encoding="utf-8"
         )
         self.assertEqual("metadata_mismatch", self.service.validate("task-123", fresh_minutes=30).code)
@@ -212,16 +217,19 @@ class CheckpointTests(RepoCase):
     def test_checkpoint_writes_handoff_and_state(self) -> None:
         result = self.service.checkpoint("task-123", self.draft(), harness="claude", fresh_minutes=30)
         self.assertTrue(result.ok)
-        handoff = (self.repo / ".ai/HANDOFF.md").read_text(encoding="utf-8")
-        self.assertIn("Updated: 2026-07-11T10:00:00+00:00", handoff)
-        self.assertIn(f"- Repo: {self.repo.resolve()}", handoff)
+        index = (self.repo / ".ai/HANDOFF.md").read_text(encoding="utf-8")
+        self.assertIn("[task-123](handoffs/task-123.md)", index)
+        task_document = self.service._task_path("task-123").read_text(encoding="utf-8")
+        self.assertIn("Updated: 2026-07-11T10:00:00+00:00", task_document)
+        self.assertIn(f"- Repo: {self.repo.resolve()}", task_document)
         branch = run("git", "branch", "--show-current", cwd=self.repo).stdout.strip()
-        self.assertIn(f"- Branch: {branch}", handoff)
-        self.assertRegex(handoff, r"- HEAD: [0-9a-f]{40}")
-        self.assertIn("- Dirty: false", handoff)
+        self.assertIn(f"- Branch: {branch}", task_document)
+        self.assertRegex(task_document, r"- HEAD: [0-9a-f]{40}")
+        self.assertIn("- Dirty: false", task_document)
         state = json.loads((self.repo / ".ai/handoff-state.json").read_text(encoding="utf-8"))
-        self.assertEqual("task-123", state["task_id"])
-        self.assertEqual("active", state["phase"])
+        self.assertEqual(2, state["version"])
+        self.assertEqual("task-123", state["active_task_id"])
+        self.assertEqual("active", state["tasks"]["task-123"]["phase"])
 
     def test_invalid_checkpoint_preserves_existing_file(self) -> None:
         target = self.repo / ".ai/HANDOFF.md"
@@ -271,6 +279,106 @@ class CheckpointTests(RepoCase):
         self.assertEqual(original, self.service.handoff.read_text(encoding="utf-8"))
 
 
+class MultiTaskIndexTests(RepoCase):
+    def other_draft(self, task_id: str = "task-456", status: str = "in-progress") -> str:
+        return BASE_DRAFT.replace("task-123", task_id).format(status=status)
+
+    def test_paused_task_moves_to_task_document_and_stays_in_index(self) -> None:
+        self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
+        self.service.pause("task-123", self.draft(), harness="test", fresh_minutes=30)
+
+        task_document = self.repo / ".ai/handoffs/task-123.md"
+        self.assertTrue(task_document.is_file())
+        self.assertIn("Task-ID: task-123", task_document.read_text(encoding="utf-8"))
+        index = self.service.handoff.read_text(encoding="utf-8")
+        self.assertIn("# Task handoffs", index)
+        self.assertIn("[task-123](handoffs/task-123.md)", index)
+        self.assertIn("paused", index)
+
+    def test_multiple_paused_tasks_survive_a_new_checkpoint(self) -> None:
+        self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
+        self.service.pause("task-123", self.draft(), harness="test", fresh_minutes=30)
+        self.service.checkpoint("task-456", self.other_draft(), harness="test", fresh_minutes=30)
+        self.service.pause("task-456", self.other_draft(), harness="test", fresh_minutes=30)
+
+        registry = json.loads(self.service.state_path.read_text(encoding="utf-8"))
+        self.assertEqual(2, registry["version"])
+        self.assertIsNone(registry["active_task_id"])
+        self.assertEqual({"task-123", "task-456"}, set(registry["tasks"]))
+        self.assertEqual("paused", registry["tasks"]["task-123"]["phase"])
+        self.assertEqual("paused", registry["tasks"]["task-456"]["phase"])
+        index = self.service.handoff.read_text(encoding="utf-8")
+        self.assertIn("[task-123](handoffs/task-123.md)", index)
+        self.assertIn("[task-456](handoffs/task-456.md)", index)
+
+    def test_only_one_task_can_be_active(self) -> None:
+        self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
+        with self.assertRaisesRegex(DocumentError, "active_task_mismatch"):
+            self.service.checkpoint("task-456", self.other_draft(), harness="test", fresh_minutes=30)
+
+        registry = json.loads(self.service.state_path.read_text(encoding="utf-8"))
+        self.assertEqual("task-123", registry["active_task_id"])
+        self.assertNotIn("task-456", registry["tasks"])
+
+    def test_legacy_unfinished_handoff_is_preserved_when_state_points_to_completed_task(self) -> None:
+        ai = self.repo / ".ai"
+        ai.mkdir()
+        legacy = self.other_draft("ssw03").replace("Status: in-progress", "Status: paused（later）")
+        (ai / "HANDOFF.md").write_text(legacy, encoding="utf-8")
+        (ai / "handoff-state.json").write_text(
+            json.dumps({"task_id": "different-completed-task", "phase": "completed"}),
+            encoding="utf-8",
+        )
+        service = HandoffService(self.repo, now=lambda: self.now)
+
+        service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
+
+        self.assertEqual(legacy, (ai / "handoffs/ssw03.md").read_text(encoding="utf-8"))
+        registry = json.loads((ai / "handoff-state.json").read_text(encoding="utf-8"))
+        self.assertEqual("paused", registry["tasks"]["ssw03"]["phase"])
+        self.assertEqual("task-123", registry["active_task_id"])
+
+    def test_unsafe_task_ids_are_rejected_before_writing(self) -> None:
+        for task_id in ("../escape", "nested/task", ".", "two words"):
+            with self.subTest(task_id=task_id):
+                draft = BASE_DRAFT.replace("task-123", task_id).format(status="in-progress")
+                with self.assertRaisesRegex(DocumentError, "unsafe_task_id"):
+                    self.service.checkpoint(task_id, draft, harness="test", fresh_minutes=30)
+
+        self.assertFalse((self.repo / ".ai/handoffs").exists())
+
+    def test_corrupt_registry_cannot_create_a_second_active_task(self) -> None:
+        self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
+        registry = json.loads(self.service.state_path.read_text(encoding="utf-8"))
+        registry["active_task_id"] = None
+        self.service.state_path.write_text(json.dumps(registry), encoding="utf-8")
+
+        with self.assertRaisesRegex(DocumentError, "invalid_state"):
+            self.service.checkpoint(
+                "task-456", self.other_draft(), harness="test", fresh_minutes=30
+            )
+
+        self.assertFalse(self.service._task_path("task-456").exists())
+
+    def test_registry_rejects_missing_active_entry_and_unsafe_task_key(self) -> None:
+        cases = (
+            {"version": 2, "active_task_id": "missing", "tasks": {}},
+            {
+                "version": 2,
+                "active_task_id": None,
+                "tasks": {"../escape": {"phase": "paused", "status": "in-progress"}},
+            },
+        )
+        for registry in cases:
+            with self.subTest(registry=registry):
+                self.service.state_path.parent.mkdir(exist_ok=True)
+                self.service.state_path.write_text(json.dumps(registry), encoding="utf-8")
+                with self.assertRaisesRegex(DocumentError, "invalid_state"):
+                    self.service.checkpoint(
+                        "task-456", self.other_draft(), harness="test", fresh_minutes=30
+                    )
+
+
 class CompleteTests(RepoCase):
     def completed_draft(self) -> str:
         return BASE_DRAFT.replace(
@@ -308,7 +416,8 @@ class CompleteTests(RepoCase):
         (self.repo / "tracked.txt").write_text("dirty\n", encoding="utf-8")
         result = self.service.complete("task-123", self.completed_draft(), harness="codex", fresh_minutes=30)
         self.assertTrue(result.ok)
-        self.assertIn("- Dirty: true", self.service.handoff.read_text(encoding="utf-8"))
+        self.assertFalse(self.service._task_path("task-123").exists())
+        self.assertIn("## Active\n- None.", self.service.handoff.read_text(encoding="utf-8"))
 
     def test_invalid_completed_draft_preserves_existing_handoff(self) -> None:
         self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
@@ -318,12 +427,14 @@ class CompleteTests(RepoCase):
             self.service.complete("task-123", oversized, harness="test", fresh_minutes=30)
         self.assertEqual(original, self.service.handoff.read_text(encoding="utf-8"))
 
-    def test_complete_writes_completed_state_and_compliance_metrics(self) -> None:
+    def test_complete_removes_task_state_and_writes_compliance_metrics(self) -> None:
         self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
         result = self.service.complete("task-123", self.completed_draft(), harness="claude", fresh_minutes=30)
         self.assertTrue(result.ok)
         state = json.loads((self.repo / ".ai/handoff-state.json").read_text(encoding="utf-8"))
-        self.assertEqual("completed", state["phase"])
+        self.assertIsNone(state["active_task_id"])
+        self.assertNotIn("task-123", state["tasks"])
+        self.assertFalse(self.service._task_path("task-123").exists())
         report = self.service.compliance()
         self.assertEqual(1, report["attempts"])
         self.assertEqual(1, report["valid"])
@@ -341,7 +452,29 @@ class CompleteTests(RepoCase):
             )
         self.assertFalse(result.ok)
         self.assertEqual("stale_git", result.code)
-        self.assertEqual("active", json.loads(self.service.state_path.read_text())["phase"])
+        state = json.loads(self.service.state_path.read_text())
+        self.assertEqual("task-123", state["active_task_id"])
+        self.assertEqual("active", state["tasks"]["task-123"]["phase"])
+
+    def test_complete_removes_only_target_and_preserves_paused_task(self) -> None:
+        self.service.checkpoint("task-123", self.draft(), harness="test", fresh_minutes=30)
+        self.service.pause("task-123", self.draft(), harness="test", fresh_minutes=30)
+        other = BASE_DRAFT.replace("task-123", "task-456").format(status="in-progress")
+        completed_other = other.replace("Status: in-progress", "Status: completed")
+        self.service.checkpoint("task-456", other, harness="test", fresh_minutes=30)
+
+        result = self.service.complete(
+            "task-456", completed_other, harness="test", fresh_minutes=30
+        )
+
+        self.assertTrue(result.ok)
+        state = json.loads(self.service.state_path.read_text(encoding="utf-8"))
+        self.assertEqual({"task-123"}, set(state["tasks"]))
+        self.assertTrue(self.service._task_path("task-123").exists())
+        self.assertFalse(self.service._task_path("task-456").exists())
+        index = self.service.handoff.read_text(encoding="utf-8")
+        self.assertIn("[task-123](handoffs/task-123.md)", index)
+        self.assertNotIn("task-456", index)
 
 
 if __name__ == "__main__":
