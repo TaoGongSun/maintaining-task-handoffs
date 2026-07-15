@@ -88,8 +88,9 @@ class SkillContractTests(unittest.TestCase):
             "handoff_still_open",
             "本機專案待辦",
             "local project tasks",
-            "私人 Git 同步屬階段二",
-            "private Git sync is phase two",
+            "handoff memory init",
+            "handoff memory sync",
+            "memory_diverged",
             "同 ID handoff",
             "same-ID handoff",
         ):
@@ -104,6 +105,31 @@ class SkillContractTests(unittest.TestCase):
             self.assertIn("yesterday", text.lower())
             self.assertIn("multiple matches", text.lower())
             self.assertIn("do not guess", text.lower())
+
+    def test_memory_guidance_and_bilingual_docs(self) -> None:
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        adapter = (ROOT / "adapters/trigger-block.md").read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        for text in (skill, adapter, readme):
+            lowered = text.lower()
+            for phrase in (
+                "handoff memory init",
+                "handoff memory sync",
+                "all projects",
+                "private",
+                "memory_diverged",
+                "fast-forward",
+                "does not copy handoff",
+            ):
+                self.assertIn(phrase.lower(), lowered)
+        for phrase in (
+            "所有專案",
+            "私人",
+            "不複製 handoff",
+            "不同步秘密",
+            "雙邊都有變更",
+        ):
+            self.assertIn(phrase, readme)
 
 
 class HookMergeTests(unittest.TestCase):

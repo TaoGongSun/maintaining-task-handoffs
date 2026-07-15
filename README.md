@@ -67,7 +67,38 @@ handoff task list
 handoff task show --task-id <id>
 ```
 
-查詢時先讀 `.ai/TASKS.md`；「昨天做了什麼」只讀對應本地日期的 `.ai/history/` 檔。完成項會從活躍索引移除，只在歷史留下一行 milestone 或 completed 摘要。若同 ID handoff 仍為 active／paused／blocked，待辦完成會回報 `handoff_still_open`。預設全部本機、不進產品 Git；**私人 Git 同步屬階段二**，本階段不提供。
+查詢時先讀 `.ai/TASKS.md`；「昨天做了什麼」只讀對應本地日期的 `.ai/history/` 檔。完成項會從活躍索引移除，只在歷史留下一行 milestone 或 completed 摘要。若同 ID handoff 仍為 active／paused／blocked，待辦完成會回報 `handoff_still_open`。預設全部本機、不進產品 Git。
+
+### 跨專案私人記憶（可選）
+
+若要在**所有專案**之間查詢待辦與活動，可自建一個**私人** Git 倉庫（例如本機 bare remote 或你有權限的私人 hosting），clone 到本機後再綁定：
+
+```bash
+# 1) 建立／clone 私人記憶庫（使用者自行授權 remote；本工具從不代建公開庫）
+git clone <private-memory-url> ~/project-memory
+
+# 2) 在任一產品專案內綁定路徑
+handoff memory init --path ~/project-memory
+
+# 3) 手動同步（一次最多一個 commit；有 upstream 才 push）
+handoff memory status
+handoff memory sync
+handoff memory sync --no-push   # 只做本機記憶庫 fast-forward／比對
+```
+
+同步生命週期：
+
+1. 記憶庫 worktree 必須乾淨；有 upstream 時先 `fetch`，且只允許 **fast-forward** 目前分支。
+2. 以內容雜湊比較本機 snapshot、記憶庫 snapshot 與上次共同 base（`.ai/memory-sync.json`）。
+3. 僅單邊變更時整包上傳或下載；雙方相同則 `memory_current` 且不新 commit。
+4. **雙邊都有變更**時回報 `memory_diverged` 並停止，不覆蓋任一側，也不自動 force／rebase／merge。
+5. 上傳成功但 `push` 失敗時保留有效本機記憶 commit，並標示 remote 尚未同步完成。
+
+手動解衝突：在預設 sync 之外選定一側（還原選定 snapshot 後再 sync），或把其中一邊當成新基準後重新同步。
+
+納入記憶的內容：`project.json`、`task-state.json`、`tasks/`、`history/`；根目錄 `TASKS.md`／`PROJECTS.md`／每日 history 為再生索引。**不複製 handoff** 文件與 registry；**不同步秘密**、token 或無關聊天。私人總集**不是** task 編輯面——專案待辦的 update／complete 仍只在來源 repo 用 `handoff task …`。
+
+跨專案查詢：明確要求「所有專案」時讀記憶庫根 `TASKS.md`；跨專案「昨天」只讀該根 history 對應日檔。一般提示仍優先目前專案的本機 `.ai/`。
 
 ---
 
@@ -270,7 +301,38 @@ handoff task list
 handoff task show --task-id <id>
 ```
 
-Queries start at `.ai/TASKS.md`; “what did I do yesterday?” reads only the local-date file under `.ai/history/`. Completed work leaves the active index and remains as one-line milestone or completed history. A same-ID handoff that is still active, paused, or blocked blocks task completion with `handoff_still_open`. Default is local-only and excluded from product Git; **private Git sync is phase two** and is not included here.
+Queries start at `.ai/TASKS.md`; “what did I do yesterday?” reads only the local-date file under `.ai/history/`. Completed work leaves the active index and remains as one-line milestone or completed history. A same-ID handoff that is still active, paused, or blocked blocks task completion with `handoff_still_open`. Default is local-only and excluded from product Git.
+
+### Optional private cross-project memory
+
+To query tasks and activity across **all projects**, create a **private** Git repository yourself (local bare remote or private hosting you authorize), clone it, then bind:
+
+```bash
+# 1) Create/clone a private memory repo (this tool never creates a public remote)
+git clone <private-memory-url> ~/project-memory
+
+# 2) Bind from any product repository
+handoff memory init --path ~/project-memory
+
+# 3) Manual sync (at most one commit per run; push only when upstream exists)
+handoff memory status
+handoff memory sync
+handoff memory sync --no-push   # local memory fast-forward / compare only
+```
+
+Sync lifecycle:
+
+1. Memory worktree must be clean; with upstream, `fetch` first and only **fast-forward** the current branch.
+2. Compare content hashes for local snapshot, memory snapshot, and last shared base (`.ai/memory-sync.json`).
+3. Upload or download a full validated snapshot when only one side changed; identical sides return `memory_current` with no new commit.
+4. When **both sides changed**, return `memory_diverged` and stop without overwriting either side—never force, rebase, or merge task content.
+5. A failed push keeps the valid local memory commit and reports that remote synchronization is incomplete.
+
+Manual resolution: choose one side outside default sync, restore the chosen snapshot, then sync again.
+
+Included: `project.json`, `task-state.json`, `tasks/`, `history/`; root `TASKS.md` / `PROJECTS.md` / daily history are regenerated. The memory repo **does not copy handoff** documents and must not carry secrets. It is not a task editing surface—mutate project tasks only in the source repo via `handoff task …`.
+
+Cross-project queries: explicit “all projects” reads the private memory root `TASKS.md`; cross-project day queries read only that root history file. Ordinary prompts still prefer the current project’s local `.ai/`.
 
 ## Install
 

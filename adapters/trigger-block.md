@@ -8,4 +8,6 @@ When the current task has plan documents, list only those plans under `## Plan f
 ## Project tasks
 
 Current-project todos start at `.ai/TASKS.md`; open only the linked task file for detail. Multiple matches: list them and do not guess. “Yesterday” reads only `.ai/history/<local-date>.md`. Mutations use `handoff task add|update|milestone|complete|list|show`; agents author drafts and never hand-edit generated indexes. Completion needs evidence via `handoff task complete`—inactivity, clean Git, or a commit never imply done. Same-ID open handoffs block task completion. Long-task handoff activation stays independent.
+
+Explicit all projects queries read the configured private memory root `TASKS.md`; cross-project day queries use only that root’s history file. Prefer local `.ai/` for the current project. Manual sync: `handoff memory init --path …`, `handoff memory status`, `handoff memory sync` (optional `--no-push`). Memory is private; does not copy handoff or secrets; fetch then fast-forward only; `memory_diverged` stops without overwrite. Never treat the memory repo as a task edit surface.
 <!-- maintaining-task-handoffs:end -->

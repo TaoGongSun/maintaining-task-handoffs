@@ -57,6 +57,9 @@ Local project todos are independent of long-task handoffs and live under the sam
 - Current-project task questions read `.ai/TASKS.md` first.
 - A named task follows exactly one index link into `.ai/tasks/<task-id>.md`. If multiple matches appear, list them and stop; do not guess.
 - “Yesterday” (or another local day) reads only the configured local date file under `.ai/history/`.
+- Explicit **all projects** task queries read the configured private memory root `TASKS.md` (not product Git).
+- Explicit cross-project “yesterday” queries read only the matching root history file under that private memory repository.
+- Ordinary prompts stay on the current project; do not open the private memory tree unless the user asks for all projects or sync.
 - Long-task handoff activation remains independent; do not invent a project task just because a handoff exists.
 
 ### Mutations
@@ -73,6 +76,21 @@ handoff task show --task-id <id>
 ```
 
 Completion requires evidence that the whole task goal is done, then `handoff task complete`. Inactivity, a clean Git tree, or a likely commit never imply completion. If a same-ID handoff is still open (active, paused, or blocked), complete or pause that handoff first.
+
+### Private memory (optional)
+
+Cross-project memory is an independent **private** Git repository the user creates and authorizes. It is not a task editing surface and does not copy handoff documents or secrets.
+
+```text
+handoff memory init --path <private-memory-clone>
+handoff memory status
+handoff memory sync [--no-push]
+```
+
+- Run `handoff memory sync` only when the user asks to synchronize; report local commit success separately from remote push success.
+- Sync fetches and only **fast-forward**s the memory branch; never force, rebase, or merge task content.
+- Direction uses content hashes (`local` / `memory` / `base`). Both sides changed yields `memory_diverged` and stops without overwriting either side.
+- Project task mutations always happen in the source repository via `handoff task …`; never edit tasks inside the private memory tree.
 
 ## Final response
 
