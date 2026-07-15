@@ -9,6 +9,7 @@ from pathlib import Path
 from handoff_core.document import DocumentError
 from handoff_core.git import NotGitRepoError, repo_root
 from handoff_core.service import HandoffService
+from handoff_core.task_service import TaskService
 
 
 def parser() -> argparse.ArgumentParser:
@@ -24,6 +25,38 @@ def parser() -> argparse.ArgumentParser:
     validate.add_argument("--task-id")
     validate.add_argument("--fresh-minutes", type=int, default=30)
     commands.add_parser("compliance")
+
+    task = commands.add_parser("task")
+    task_commands = task.add_subparsers(dest="task_command", required=True)
+
+    task_add = task_commands.add_parser("add")
+    task_add.add_argument("--task-id", required=True)
+    task_add.add_argument("--input", required=True, type=Path)
+    task_add.add_argument("--timezone")
+
+    task_update = task_commands.add_parser("update")
+    task_update.add_argument("--task-id", required=True)
+    task_update.add_argument("--input", required=True, type=Path)
+    task_update.add_argument("--timezone")
+
+    task_milestone = task_commands.add_parser("milestone")
+    task_milestone.add_argument("--task-id", required=True)
+    task_milestone.add_argument("--input", required=True, type=Path)
+    task_milestone.add_argument("--summary", required=True)
+    task_milestone.add_argument("--timezone")
+
+    task_complete = task_commands.add_parser("complete")
+    task_complete.add_argument("--task-id", required=True)
+    task_complete.add_argument("--summary", required=True)
+    task_complete.add_argument("--timezone")
+
+    task_list = task_commands.add_parser("list")
+    task_list.add_argument("--timezone")
+
+    task_show = task_commands.add_parser("show")
+    task_show.add_argument("--task-id", required=True)
+    task_show.add_argument("--timezone")
+
     return result
 
 
@@ -34,8 +67,37 @@ def main(argv: list[str] | None = None) -> int:
     except NotGitRepoError:
         print(json.dumps({"ok": False, "code": "not_git_repo"}))
         return 3
-    service = HandoffService(root)
+
     try:
+        if args.command == "task":
+            service = TaskService(root, timezone_name=getattr(args, "timezone", None))
+            if args.task_command == "add":
+                result = service.add(args.task_id, args.input.read_text(encoding="utf-8"))
+                print(json.dumps(result.to_dict(), sort_keys=True))
+                return 0 if result.ok else 4
+            if args.task_command == "update":
+                result = service.update(args.task_id, args.input.read_text(encoding="utf-8"))
+                print(json.dumps(result.to_dict(), sort_keys=True))
+                return 0 if result.ok else 4
+            if args.task_command == "milestone":
+                result = service.milestone(
+                    args.task_id,
+                    args.input.read_text(encoding="utf-8"),
+                    args.summary,
+                )
+                print(json.dumps(result.to_dict(), sort_keys=True))
+                return 0 if result.ok else 4
+            if args.task_command == "complete":
+                result = service.complete(args.task_id, args.summary)
+                print(json.dumps(result.to_dict(), sort_keys=True))
+                return 0 if result.ok else 4
+            if args.task_command == "list":
+                print(service.list(), end="")
+                return 0
+            print(service.show(args.task_id), end="")
+            return 0
+
+        service = HandoffService(root)
         if args.command == "checkpoint":
             result = service.checkpoint(
                 args.task_id,
