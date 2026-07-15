@@ -167,5 +167,103 @@ class ProjectAndActivityTests(RepoCase):
             merge_event([event], conflicting)
 
 
+from handoff_core.task_service import TaskService
+
+
+class TaskServiceTests(RepoCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.service = TaskService(self.repo, now=lambda: self.now)
+
+    def test_add_writes_document_registry_index_and_entrypoint(self) -> None:
+        result = self.service.add("project-memory", TASK_DRAFT)
+        self.assertEqual("task_added", result.code)
+        self.assertTrue((self.repo / ".ai/tasks/project-memory.md").is_file())
+        state = json.loads((self.repo / ".ai/task-state.json").read_text())
+        self.assertEqual("in-progress", state["tasks"]["project-memory"]["status"])
+        self.assertIn("project-memory", (self.repo / ".ai/TASKS.md").read_text())
+        self.assertIn("[未完成待辦](TASKS.md)", (self.repo / ".ai/README.md").read_text())
+
+    def test_update_preserves_created_and_rejects_duplicates(self) -> None:
+        self.service.add("project-memory", TASK_DRAFT)
+        created = json.loads((self.repo / ".ai/task-state.json").read_text())["tasks"]["project-memory"]["created"]
+        self.now += timedelta(hours=1)
+        updated = TASK_DRAFT.replace("Implement the task parser.", "Implement the task service.")
+        self.assertEqual("task_updated", self.service.update("project-memory", updated).code)
+        state = json.loads((self.repo / ".ai/task-state.json").read_text())
+        self.assertEqual(created, state["tasks"]["project-memory"]["created"])
+        with self.assertRaisesRegex(DocumentError, "task_exists"):
+            self.service.add("project-memory", updated)
+
+    def test_interrupted_transaction_recovers(self) -> None:
+        self.service.add("project-memory", TASK_DRAFT)
+        changed = TASK_DRAFT.replace("Implement the task parser.", "Implement the task service.")
+        with patch.object(self.service, "_apply_transaction", side_effect=OSError("process stopped")):
+            with self.assertRaisesRegex(OSError, "process stopped"):
+                self.service.update("project-memory", changed)
+        self.assertTrue(self.service.transaction_path.is_file())
+
+        recovered = TaskService(self.repo, now=lambda: self.now)
+
+        self.assertFalse(recovered.transaction_path.exists())
+        self.assertIn("Implement the task service.", recovered.show("project-memory"))
+
+
+class TaskCompletionTests(RepoCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.tasks = TaskService(self.repo, now=lambda: self.now)
+        self.tasks.add("project-memory", TASK_DRAFT)
+
+    def test_milestone_updates_task_and_history_atomically(self) -> None:
+        changed = TASK_DRAFT.replace("Design approved.", "- Parser implemented.")
+        result = self.tasks.milestone("project-memory", changed, "Parser implemented.")
+        self.assertEqual("milestone_recorded", result.code)
+        history = (self.repo / ".ai/history/2026-07-11.md").read_text()
+        self.assertIn("`milestone`", history)
+        self.assertIn("Parser implemented.", history)
+
+    def test_complete_removes_active_task_and_writes_history(self) -> None:
+        result = self.tasks.complete("project-memory", "Local task support shipped.")
+        self.assertEqual("task_completed", result.code)
+        self.assertFalse((self.repo / ".ai/tasks/project-memory.md").exists())
+        self.assertNotIn("project-memory", (self.repo / ".ai/TASKS.md").read_text())
+        self.assertIn("`completed`", (self.repo / ".ai/history/2026-07-11.md").read_text())
+
+    def test_open_handoff_blocks_task_completion(self) -> None:
+        handoff = HandoffService(self.repo, now=lambda: self.now)
+        handoff.checkpoint(
+            "project-memory",
+            BASE_DRAFT.replace("task-123", "project-memory").format(status="in-progress"),
+            "test",
+            30,
+        )
+        with self.assertRaisesRegex(DocumentError, "handoff_still_open"):
+            self.tasks.complete("project-memory", "Local task support shipped.")
+
+    def test_mid_apply_failure_restores_task(self) -> None:
+        task_path = self.repo / ".ai/tasks/project-memory.md"
+        original_task = task_path.read_text()
+        original_state = (self.repo / ".ai/task-state.json").read_text()
+        original_write = self.tasks._write_target
+        calls = 0
+
+        def fail_second_write(relative: str, content: str | None) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("disk full")
+            original_write(relative, content)
+
+        with patch.object(self.tasks, "_write_target", side_effect=fail_second_write):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                self.tasks.complete("project-memory", "Local task support shipped.")
+
+        self.assertEqual(original_task, task_path.read_text())
+        self.assertEqual(original_state, (self.repo / ".ai/task-state.json").read_text())
+        self.assertFalse((self.repo / ".ai/history/2026-07-11.md").exists())
+        self.assertFalse(self.tasks.transaction_path.exists())
+
+
 if __name__ == "__main__":
     unittest.main()
