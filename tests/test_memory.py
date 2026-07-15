@@ -79,6 +79,125 @@ class SnapshotTests(TaskRepoCase):
             load_snapshot(self.repo)
 
 
+def create_snapshot_fixture(project_dir: Path, project_id: str, task_id: str) -> None:
+    project_dir.mkdir(parents=True, exist_ok=True)
+    project = {
+        "version": 1,
+        "id": project_id,
+        "name": project_id.split("-")[-1] if "-" in project_id else project_id,
+        "remote": None,
+    }
+    created = "2026-07-15T09:00:00+08:00"
+    updated = "2026-07-15T10:00:00+08:00"
+    state = {
+        "version": 1,
+        "tasks": {
+            task_id: {
+                "status": "in-progress",
+                "created": created,
+                "updated": updated,
+            }
+        },
+    }
+    task_text = f"""# Task
+Task-ID: {task_id}
+Title: Task {task_id}
+Status: in-progress
+Created: {created}
+Updated: {updated}
+
+## Summary
+Summary for {task_id}.
+
+## Next action
+Work on {task_id}.
+"""
+    history_text = f"""# Activity for 2026-07-15
+
+<!-- event {{"kind": "milestone", "project_id": "{project_id}", "summary": "Started {task_id}.", "task_id": "{task_id}", "timestamp": "2026-07-15T09:30:00+08:00"}} -->
+- 09:30 +0800 — `milestone` — `{project_id}/{task_id}`：Started {task_id}.
+"""
+    (project_dir / "project.json").write_text(
+        json.dumps(project, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (project_dir / "task-state.json").write_text(
+        json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (project_dir / "tasks").mkdir(exist_ok=True)
+    (project_dir / "tasks" / f"{task_id}.md").write_text(task_text, encoding="utf-8")
+    (project_dir / "history").mkdir(exist_ok=True)
+    (project_dir / "history" / "2026-07-15.md").write_text(history_text, encoding="utf-8")
+    (project_dir / "sync.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "snapshot_hash": "fixture",
+                "synced": "2026-07-15T11:00:00+08:00",
+                "source_repo": "/tmp/fixture",
+            },
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def make_duplicate_project_fixture() -> Path:
+    root = Path(tempfile.mkdtemp())
+    create_snapshot_fixture(root / "projects" / "github.com-owner-one", "github.com-owner-one", "task-one")
+    create_snapshot_fixture(root / "projects" / "github.com-owner-dup", "github.com-owner-one", "task-dup")
+    return root
+
+
+def make_conflicting_history_fixture() -> Path:
+    root = Path(tempfile.mkdtemp())
+    project_id = "github.com-owner-one"
+    create_snapshot_fixture(root / "projects" / project_id, project_id, "task-one")
+    history = root / "projects" / project_id / "history" / "2026-07-15.md"
+    history.write_text(
+        f"""# Activity for 2026-07-15
+
+<!-- event {{"kind": "milestone", "project_id": "{project_id}", "summary": "Summary A.", "task_id": "task-one", "timestamp": "2026-07-15T09:30:00+08:00"}} -->
+- 09:30 +0800 — `milestone` — `{project_id}/task-one`：Summary A.
+<!-- event {{"kind": "milestone", "project_id": "{project_id}", "summary": "Summary B.", "task_id": "task-one", "timestamp": "2026-07-15T09:30:00+08:00"}} -->
+- 09:30 +0800 — `milestone` — `{project_id}/task-one`：Summary B.
+""",
+        encoding="utf-8",
+    )
+    return root
+
+
+class MemoryAggregationTests(unittest.TestCase):
+    def test_rebuilds_global_tasks_projects_and_history(self) -> None:
+        from handoff_core.memory_service import rebuild_memory_views
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            create_snapshot_fixture(
+                root / "projects/github.com-owner-one", "github.com-owner-one", "task-one"
+            )
+            create_snapshot_fixture(
+                root / "projects/github.com-owner-two", "github.com-owner-two", "task-two"
+            )
+            views = rebuild_memory_views(root)
+            self.assertIn("github.com-owner-one", views["TASKS.md"])
+            self.assertIn("task-two", views["TASKS.md"])
+            self.assertIn("projects/github.com-owner-one/TASKS.md", views["PROJECTS.md"])
+            self.assertIn("github.com-owner-two/task-two", views["history/2026-07-15.md"])
+
+    def test_conflicting_project_or_event_stops_rebuild(self) -> None:
+        from handoff_core.memory_service import rebuild_memory_views
+
+        with self.assertRaisesRegex(DocumentError, "project_id_conflict"):
+            rebuild_memory_views(make_duplicate_project_fixture())
+        with self.assertRaisesRegex(DocumentError, "history_conflict"):
+            rebuild_memory_views(make_conflicting_history_fixture())
+
+
 class MemoryConfigurationTests(TaskRepoCase):
     def setUp(self) -> None:
         super().setUp()
