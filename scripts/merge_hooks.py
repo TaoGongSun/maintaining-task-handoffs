@@ -20,8 +20,8 @@ def load(path: Path) -> dict:
     return value
 
 
-def is_managed(group: dict) -> bool:
-    return any(MARKER in str(hook.get("command", "")) for hook in group.get("hooks", []))
+def is_managed(hook: dict) -> bool:
+    return MARKER in str(hook.get("command", ""))
 
 
 def remove_managed(config: dict) -> dict:
@@ -31,7 +31,16 @@ def remove_managed(config: dict) -> dict:
     for event in list(hooks):
         groups = hooks[event]
         if isinstance(groups, list):
-            hooks[event] = [group for group in groups if not is_managed(group)]
+            retained_groups = []
+            for group in groups:
+                group_hooks = group.get("hooks")
+                if not isinstance(group_hooks, list):
+                    retained_groups.append(group)
+                    continue
+                group["hooks"] = [hook for hook in group_hooks if not is_managed(hook)]
+                if group["hooks"]:
+                    retained_groups.append(group)
+            hooks[event] = retained_groups
         if not hooks[event]:
             del hooks[event]
     if not hooks:

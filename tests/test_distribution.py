@@ -84,6 +84,33 @@ class SkillContractTests(unittest.TestCase):
 
 
 class HookMergeTests(unittest.TestCase):
+    def test_install_and_remove_preserve_unrelated_hooks_in_managed_group(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "hooks.json"
+            managed = {"type": "command", "command": "run maintaining-task-handoffs hook"}
+            glass = {"type": "command", "command": "afplay Glass.aiff"}
+            target.write_text(json.dumps({"hooks": {
+                "Stop": [{"matcher": "keep-me", "hooks": [managed, glass]}],
+                "Legacy": [{"matcher": "remove-me", "hooks": [managed]}],
+            }}), encoding="utf-8")
+            command = ["python3", str(ROOT / "scripts/merge_hooks.py"), "install", str(target),
+                       str(ROOT / "hooks/claude/hooks.json")]
+
+            for _ in range(3):
+                subprocess.run(command, check=True)
+            merged = json.loads(target.read_text(encoding="utf-8"))
+            stop_groups = merged["hooks"]["Stop"]
+            stop_commands = [hook["command"] for group in stop_groups for hook in group["hooks"]]
+            self.assertEqual(1, sum("maintaining-task-handoffs" in item for item in stop_commands))
+            retained = next((group for group in stop_groups if glass in group["hooks"]), None)
+            self.assertIsNotNone(retained, "install removed the unrelated Glass hook")
+            self.assertEqual("keep-me", retained["matcher"])
+            self.assertNotIn("Legacy", merged["hooks"])
+
+            subprocess.run(command[:2] + ["remove", str(target)], check=True)
+            cleaned = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual({"hooks": {"Stop": [{"matcher": "keep-me", "hooks": [glass]}]}}, cleaned)
+
     def test_merge_and_remove_preserve_unrelated_hooks(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             target = Path(temp) / "hooks.json"
