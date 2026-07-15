@@ -8,7 +8,9 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+from handoff_core.activity import ActivityEvent, merge_event, parse_activity, render_activity
 from handoff_core.document import DocumentError
+from handoff_core.project import load_or_create_project
 from handoff_core.service import HandoffService
 from handoff_core.task_document import parse_task_draft, render_task, render_task_index
 
@@ -125,6 +127,44 @@ class TaskDocumentTests(unittest.TestCase):
         self.assertIn("## Todo\n- None.", text)
         self.assertIn("## Blocked", text)
         self.assertIn("下一步：Implement the task parser.", text)
+
+
+class ProjectAndActivityTests(RepoCase):
+    def test_remote_identity_normalizes_ssh_and_https(self) -> None:
+        run("git", "remote", "add", "origin", "git@github.com:TaoGongSun/repo.git", cwd=self.repo)
+        ssh = load_or_create_project(self.repo)
+        (self.repo / ".ai/project.json").unlink()
+        run("git", "remote", "set-url", "origin", "https://github.com/TaoGongSun/repo.git", cwd=self.repo)
+        https = load_or_create_project(self.repo)
+        self.assertEqual("github.com-taogongsun-repo", ssh.project_id)
+        self.assertEqual(ssh.project_id, https.project_id)
+
+    def test_local_identity_survives_directory_move(self) -> None:
+        first = load_or_create_project(self.repo)
+        moved = self.repo.parent / f"{self.repo.name}-moved"
+        self.temp.cleanup = lambda: None
+        self.repo.rename(moved)
+        second = load_or_create_project(moved)
+        self.assertEqual(first.project_id, second.project_id)
+        # Manual cleanup because TemporaryDirectory cleanup was disabled for the rename.
+        import shutil
+
+        shutil.rmtree(moved, ignore_errors=True)
+
+    def test_activity_round_trip_and_conflict(self) -> None:
+        event = ActivityEvent(
+            timestamp="2026-07-15T10:30:00+08:00",
+            kind="milestone",
+            project_id="github.com-taogongsun-repo",
+            task_id="project-memory",
+            summary="Design approved.",
+        )
+        rendered = render_activity([event], date(2026, 7, 15))
+        self.assertEqual([event], parse_activity(rendered))
+        self.assertEqual([event], merge_event([], event))
+        conflicting = ActivityEvent(**{**event.__dict__, "summary": "Different summary."})
+        with self.assertRaisesRegex(DocumentError, "history_conflict"):
+            merge_event([event], conflicting)
 
 
 if __name__ == "__main__":
