@@ -230,5 +230,82 @@ class MemoryConfigurationTests(TaskRepoCase):
         self.assertFalse(status.details["has_upstream"])
 
 
+
+def load_memory_project_snapshot(memory: Path, project_id: str):
+    from handoff_core.snapshot import load_snapshot
+
+    return load_snapshot(memory / "projects" / project_id)
+
+
+def replace_memory_snapshot_with_valid_new_task(memory: Path, project_id: str) -> None:
+    import shutil
+
+    project_dir = memory / "projects" / project_id
+    if project_dir.exists():
+        shutil.rmtree(project_dir)
+    create_snapshot_fixture(project_dir, project_id, "remote-task")
+
+
+class MemorySyncTests(TaskRepoCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.config_home = self.repo / "config-home"
+        self.memory = self.repo / "memory-repo"
+        init_repo(self.memory)
+        from handoff_core.memory_service import MemoryService
+        from handoff_core.project import load_or_create_project
+
+        self.service = MemoryService(self.repo, config_home=self.config_home)
+        self.service.init(self.memory)
+        self.project_id = load_or_create_project(self.repo).project_id
+        self.initial_commits = commit_count(self.memory)
+
+    def test_first_sync_uploads_and_commits_once(self) -> None:
+        self.tasks.add("project-memory", TASK_DRAFT)
+        result = self.service.sync(push=False)
+        self.assertEqual("memory_uploaded", result.code)
+        self.assertTrue(
+            (self.memory / f"projects/{self.project_id}/tasks/project-memory.md").is_file()
+        )
+        self.assertEqual(1, commit_count(self.memory) - self.initial_commits)
+
+    def test_no_change_sync_creates_no_commit(self) -> None:
+        self.tasks.add("project-memory", TASK_DRAFT)
+        self.service.sync(push=False)
+        before = commit_count(self.memory)
+        result = self.service.sync(push=False)
+        self.assertEqual("memory_current", result.code)
+        self.assertEqual(before, commit_count(self.memory))
+
+    def test_memory_only_change_downloads_and_regenerates_views(self) -> None:
+        self.tasks.add("project-memory", TASK_DRAFT)
+        self.service.sync(push=False)
+        replace_memory_snapshot_with_valid_new_task(self.memory, self.project_id)
+        commit_all(self.memory, "remote device change")
+        (self.repo / ".ai/TASKS.md").write_text("broken\n", encoding="utf-8")
+        result = self.service.sync(push=False)
+        self.assertEqual("memory_downloaded", result.code)
+        self.assertIn("remote-task", (self.repo / ".ai/TASKS.md").read_text())
+        self.assertNotIn("broken", (self.repo / ".ai/TASKS.md").read_text())
+
+    def test_both_sides_changed_stops_without_overwrite(self) -> None:
+        from handoff_core.snapshot import load_snapshot
+
+        self.tasks.add("project-memory", TASK_DRAFT)
+        self.service.sync(push=False)
+        self.tasks.update("project-memory", TASK_DRAFT.replace("parser", "local service"))
+        replace_memory_snapshot_with_valid_new_task(self.memory, self.project_id)
+        commit_all(self.memory, "remote device change")
+        local_before = load_snapshot(self.repo).digest
+        memory_before = load_memory_project_snapshot(self.memory, self.project_id).digest
+        with self.assertRaisesRegex(DocumentError, "memory_diverged"):
+            self.service.sync(push=False)
+        self.assertEqual(local_before, load_snapshot(self.repo).digest)
+        self.assertEqual(
+            memory_before, load_memory_project_snapshot(self.memory, self.project_id).digest
+        )
+
+
+
 if __name__ == "__main__":
     unittest.main()

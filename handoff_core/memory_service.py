@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import tempfile
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from .activity import ActivityEvent, merge_event, parse_activity, render_activity
-from .atomic import write_json
+from .atomic import write_json, write_text
 from .document import DocumentError
 from .git import repo_root
 from .memory_git import MemoryGit
 from .project import load_or_create_project, parse_project_identity
-from .snapshot import load_snapshot
+from .snapshot import Snapshot, load_snapshot, stage_snapshot
 from .task_document import TaskDraft, parse_task_draft, render_task_index
+from .task_service import TaskService
 
 
 @dataclass(frozen=True)
@@ -258,3 +261,237 @@ class MemoryService:
             "project_present": project_dir.is_dir(),
         }
         return MemoryResult(True, "memory_status", details)
+
+    def _memory_sync_path(self) -> Path:
+        return self.root / ".ai" / "memory-sync.json"
+
+    def _load_base(self, project_id: str) -> dict[str, object] | None:
+        path = self._memory_sync_path()
+        if not path.is_file():
+            return None
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return None
+        if not isinstance(raw, dict) or raw.get("version") != 1:
+            return None
+        if raw.get("project_id") != project_id:
+            return None
+        if not isinstance(raw.get("base_hash"), str):
+            return None
+        return raw
+
+    def _write_base(self, project_id: str, base_hash: str, memory_commit: str) -> None:
+        write_json(
+            self._memory_sync_path(),
+            {
+                "version": 1,
+                "project_id": project_id,
+                "base_hash": base_hash,
+                "memory_commit": memory_commit,
+            },
+        )
+
+    def _preflight(self, git: MemoryGit) -> None:
+        if not git.is_clean():
+            raise DocumentError("memory_dirty")
+        upstream = git.upstream()
+        if upstream is not None:
+            git.fetch()
+            if not git.can_fast_forward(upstream):
+                raise DocumentError("pull_not_fast_forward")
+            git.fast_forward(upstream)
+            if not git.is_clean():
+                raise DocumentError("memory_dirty")
+
+    def _memory_snapshot(self, memory_root: Path, project_id: str) -> Snapshot | None:
+        project_dir = memory_root / "projects" / project_id
+        if not project_dir.is_dir():
+            return None
+        return load_snapshot(project_dir)
+
+    def _apply_memory_files(
+        self, memory_root: Path, desired: dict[str, str | None]
+    ) -> None:
+        manifest_path = memory_root / ".memory-transaction.json"
+        snapshots: dict[str, str | None] = {}
+        for relative in desired:
+            path = memory_root / relative
+            if path.is_symlink():
+                raise DocumentError("snapshot_symlink")
+            if path.is_file():
+                snapshots[relative] = path.read_text(encoding="utf-8")
+            else:
+                snapshots[relative] = None
+        write_json(manifest_path, {"version": 1, "files": desired})
+        try:
+            for relative, content in desired.items():
+                path = memory_root / relative
+                if content is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    write_text(path, content)
+        except Exception:
+            for relative, content in snapshots.items():
+                path = memory_root / relative
+                if content is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    write_text(path, content)
+            manifest_path.unlink(missing_ok=True)
+            raise
+        manifest_path.unlink(missing_ok=True)
+
+    def _upload(
+        self,
+        git: MemoryGit,
+        memory_root: Path,
+        snapshot: Snapshot,
+        push: bool,
+    ) -> MemoryResult:
+        project_id = snapshot.project_id
+        project_prefix = f"projects/{project_id}"
+        with tempfile.TemporaryDirectory(prefix="memory-stage-") as staged:
+            stage_root = Path(staged) / "snapshot"
+            stage_snapshot(snapshot, stage_root)
+            desired: dict[str, str | None] = {}
+            for relative, content in snapshot.files.items():
+                desired[f"{project_prefix}/{relative}"] = content.decode("utf-8")
+
+            synced = datetime.now(timezone.utc).astimezone().isoformat()
+            sync_meta = {
+                "version": 1,
+                "snapshot_hash": snapshot.digest,
+                "synced": synced,
+                "source_repo": str(self.root),
+            }
+            desired[f"{project_prefix}/sync.json"] = (
+                json.dumps(sync_meta, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+            )
+
+            mirror = Path(staged) / "mirror"
+            if (memory_root / "projects").is_dir():
+                shutil.copytree(memory_root / "projects", mirror / "projects")
+            else:
+                (mirror / "projects").mkdir(parents=True)
+            target_project = mirror / "projects" / project_id
+            if target_project.exists():
+                shutil.rmtree(target_project)
+            shutil.copytree(stage_root, target_project)
+            write_json(target_project / "sync.json", sync_meta)
+
+            views = rebuild_memory_views(mirror)
+            for relative, content in views.items():
+                desired[relative] = content
+
+            history_dir = memory_root / "history"
+            if history_dir.is_dir():
+                for path in history_dir.glob("*.md"):
+                    key = f"history/{path.name}"
+                    if key not in desired:
+                        desired[key] = None
+
+            existing_project = memory_root / "projects" / project_id
+            if existing_project.is_dir():
+                for sub in ("tasks", "history"):
+                    directory = existing_project / sub
+                    if directory.is_dir():
+                        for path in directory.glob("*"):
+                            key = f"{project_prefix}/{sub}/{path.name}"
+                            if key not in desired:
+                                desired[key] = None
+
+            self._apply_memory_files(memory_root, desired)
+            (memory_root / project_prefix / "tasks").mkdir(parents=True, exist_ok=True)
+            (memory_root / project_prefix / "history").mkdir(parents=True, exist_ok=True)
+
+        commit = git.commit(f"Sync project memory for {date.today().isoformat()}")
+        head = git.head()
+        self._write_base(project_id, snapshot.digest, head)
+        details: dict[str, object] = {
+            "project_id": project_id,
+            "snapshot_hash": snapshot.digest,
+            "memory_commit": head,
+            "committed": commit is not None,
+            "remote_synced": False,
+        }
+        if push and git.upstream() is not None:
+            try:
+                git.push()
+                details["remote_synced"] = True
+            except DocumentError as error:
+                if error.code == "push_failed":
+                    details["remote_synced"] = False
+                    return MemoryResult(False, "push_failed", details)
+                raise
+        return MemoryResult(True, "memory_uploaded", details)
+
+    def _download(self, memory_root: Path, project_id: str, snapshot: Snapshot) -> MemoryResult:
+        # Validate already done via load_snapshot.
+        TaskService(self.root).install_snapshot(snapshot.files)
+        head = MemoryGit(memory_root).head()
+        self._write_base(project_id, snapshot.digest, head)
+        return MemoryResult(
+            True,
+            "memory_downloaded",
+            {
+                "project_id": project_id,
+                "snapshot_hash": snapshot.digest,
+                "memory_commit": head,
+            },
+        )
+
+    def sync(self, push: bool = True) -> MemoryResult:
+        config = self._load_config()
+        git = self._require_git_repo(config.memory_path)
+        identity = load_or_create_project(self.root)
+        project_id = identity.project_id
+
+        transaction = self.root / ".ai" / "task-transaction.json"
+        if transaction.is_file():
+            raise DocumentError("invalid_transaction")
+
+        self._preflight(git)
+        local = load_snapshot(self.root)
+        if local.project_id != project_id:
+            raise DocumentError("invalid_project")
+        memory = self._memory_snapshot(config.memory_path, project_id)
+        base = self._load_base(project_id)
+        base_hash = str(base["base_hash"]) if base is not None else None
+        memory_hash = memory.digest if memory is not None else None
+        direction = sync_direction(local.digest, memory_hash, base_hash)
+
+        if direction == "current":
+            head = git.head()
+            if base is None or base.get("base_hash") != local.digest:
+                self._write_base(project_id, local.digest, head)
+            return MemoryResult(
+                True,
+                "memory_current",
+                {
+                    "project_id": project_id,
+                    "snapshot_hash": local.digest,
+                    "memory_commit": head,
+                },
+            )
+        if direction == "upload":
+            return self._upload(git, config.memory_path, local, push)
+        assert memory is not None
+        return self._download(config.memory_path, project_id, memory)
+
+
+def sync_direction(local: str, memory: str | None, base: str | None) -> str:
+    if memory is None and base is None:
+        return "upload"
+    if memory is None and base is not None:
+        # Memory lost the project while we still have a base; treat as upload if local matches base? stop.
+        raise DocumentError("memory_diverged")
+    if local == memory:
+        return "current"
+    if base is None and memory is not None and local != memory:
+        raise DocumentError("memory_diverged")
+    if base is not None and memory == base and local != base:
+        return "upload"
+    if base is not None and local == base and memory != base:
+        return "download"
+    raise DocumentError("memory_diverged")
