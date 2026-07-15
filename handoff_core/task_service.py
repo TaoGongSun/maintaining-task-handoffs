@@ -22,7 +22,9 @@ ENTRY_TEXT = """# Project memory
 """
 
 EMPTY_REGISTRY: dict[str, object] = {"version": 1, "tasks": {}}
-ALLOWED_TOP_LEVEL = frozenset({"task-state.json", "TASKS.md", "README.md"})
+ALLOWED_TOP_LEVEL = frozenset(
+    {"task-state.json", "TASKS.md", "README.md", "project.json", "memory-sync.json"}
+)
 ALLOWED_DIRS = frozenset({"tasks", "history"})
 
 
@@ -257,6 +259,7 @@ class TaskService:
     def add(self, task_id: str, text: str) -> TaskResult:
         validate_task_id(task_id)
         draft = parse_task_draft(text, task_id)
+        load_or_create_project(self.root)
         registry = self._registry()
         tasks = registry["tasks"]
         assert isinstance(tasks, dict)
@@ -412,3 +415,67 @@ class TaskService:
             )
         )
         return TaskResult(True, "task_completed", task_id)
+
+    def install_snapshot(self, files: dict[str, bytes]) -> None:
+        required = {"project.json", "task-state.json"}
+        if not required.issubset(files):
+            raise DocumentError("invalid_snapshot")
+        try:
+            project_data = json.loads(files["project.json"].decode("utf-8"))
+            registry = json.loads(files["task-state.json"].decode("utf-8"))
+        except (UnicodeError, json.JSONDecodeError) as error:
+            raise DocumentError("invalid_snapshot") from error
+        if not isinstance(project_data, dict) or not isinstance(registry, dict):
+            raise DocumentError("invalid_snapshot")
+        self._validate_registry(registry)
+        tasks = registry["tasks"]
+        assert isinstance(tasks, dict)
+
+        documents: dict[str, TaskDraft] = {}
+        task_files: dict[str, str | None] = {}
+        for relative, content in files.items():
+            if relative in ROOT_SKIP:
+                continue
+            if relative.startswith("tasks/"):
+                name = relative.removeprefix("tasks/")
+                if not name.endswith(".md"):
+                    raise DocumentError("invalid_snapshot")
+                task_id = name[:-3]
+                validate_task_id(task_id)
+                if task_id not in tasks:
+                    raise DocumentError("invalid_snapshot")
+                text = content.decode("utf-8")
+                draft = parse_task_draft(self._strip_timestamps(text), task_id)
+                if draft.status != tasks[task_id]["status"]:
+                    raise DocumentError("invalid_snapshot")
+                documents[task_id] = draft
+                task_files[self._task_relative(task_id)] = text
+            elif relative.startswith("history/"):
+                name = relative.removeprefix("history/")
+                if not name.endswith(".md"):
+                    raise DocumentError("invalid_snapshot")
+                task_files[f".ai/history/{name}"] = content.decode("utf-8")
+            elif relative not in required:
+                raise DocumentError("invalid_snapshot")
+
+        if set(documents) != set(tasks):
+            raise DocumentError("invalid_snapshot")
+
+        existing_tasks = sorted(self.tasks_dir.glob("*.md")) if self.tasks_dir.is_dir() else []
+        for path in existing_tasks:
+            relative = f".ai/tasks/{path.name}"
+            if relative not in task_files:
+                task_files[relative] = None
+
+        existing_history = sorted(self.history_dir.glob("*.md")) if self.history_dir.is_dir() else []
+        for path in existing_history:
+            relative = f".ai/history/{path.name}"
+            if relative not in task_files:
+                task_files[relative] = None
+
+        payload = self._base_files(registry, documents, task_files)
+        payload[".ai/project.json"] = self._json_text(project_data)
+        self._commit_transaction(payload)
+
+
+ROOT_SKIP = frozenset({"project.json", "task-state.json"})

@@ -9,6 +9,10 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .atomic import write_json
+from .document import DocumentError
+
+
+PROJECT_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 @dataclass(frozen=True)
@@ -16,6 +20,28 @@ class ProjectIdentity:
     project_id: str
     name: str
     remote: str | None
+
+
+def validate_project_id(project_id: str) -> str:
+    if not PROJECT_ID_PATTERN.fullmatch(project_id):
+        raise DocumentError("invalid_project")
+    return project_id
+
+
+def parse_project_identity(value: dict[str, object]) -> ProjectIdentity:
+    if value.get("version") != 1:
+        raise DocumentError("invalid_project")
+    project_id = value.get("id")
+    name = value.get("name")
+    remote = value.get("remote")
+    if not isinstance(project_id, str) or not isinstance(name, str):
+        raise DocumentError("invalid_project")
+    if not project_id.strip() or not name.strip():
+        raise DocumentError("invalid_project")
+    validate_project_id(project_id)
+    if remote is not None and not isinstance(remote, str):
+        raise DocumentError("invalid_project")
+    return ProjectIdentity(project_id, name, remote)
 
 
 def _remote_parts(value: str) -> tuple[str, str] | None:
@@ -52,18 +78,12 @@ def _git_origin(root: Path) -> str | None:
 
 
 def _valid_identity(data: object) -> ProjectIdentity | None:
-    if not isinstance(data, dict) or data.get("version") != 1:
+    if not isinstance(data, dict):
         return None
-    project_id = data.get("id")
-    name = data.get("name")
-    remote = data.get("remote")
-    if not isinstance(project_id, str) or not project_id.strip():
+    try:
+        return parse_project_identity(data)
+    except DocumentError:
         return None
-    if not isinstance(name, str) or not name.strip():
-        return None
-    if remote is not None and not isinstance(remote, str):
-        return None
-    return ProjectIdentity(project_id, name, remote)
 
 
 def load_or_create_project(root: Path) -> ProjectIdentity:
