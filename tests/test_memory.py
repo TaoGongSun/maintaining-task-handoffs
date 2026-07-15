@@ -19,12 +19,15 @@ def run(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
 
 def init_repo(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
-    run("git", "init", "-q", cwd=path)
-    run("git", "config", "user.email", "test@example.com", cwd=path)
-    run("git", "config", "user.name", "Test", cwd=path)
-    (path / "tracked.txt").write_text("one\n", encoding="utf-8")
-    run("git", "add", "tracked.txt", cwd=path)
-    run("git", "commit", "-qm", "initial", cwd=path)
+    if not (path / ".git").exists():
+        run("git", "init", "-q", cwd=path)
+        run("git", "config", "user.email", "test@example.com", cwd=path)
+        run("git", "config", "user.name", "Test", cwd=path)
+    tracked = path / "tracked.txt"
+    if not tracked.exists():
+        tracked.write_text("one\n", encoding="utf-8")
+        run("git", "add", "tracked.txt", cwd=path)
+        run("git", "commit", "-qm", "initial", cwd=path)
     return path
 
 
@@ -74,6 +77,38 @@ class SnapshotTests(TaskRepoCase):
         task.symlink_to(self.repo / "tracked.txt")
         with self.assertRaisesRegex(DocumentError, "snapshot_symlink"):
             load_snapshot(self.repo)
+
+
+class MemoryConfigurationTests(TaskRepoCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.config_home = self.repo / "config-home"
+        self.memory = self.repo / "memory-repo"
+        init_repo(self.memory)
+        from handoff_core.memory_service import MemoryService
+
+        self.service = MemoryService(self.repo, config_home=self.config_home)
+
+    def test_init_persists_existing_git_repository(self) -> None:
+        result = self.service.init(self.memory)
+        self.assertEqual("memory_initialized", result.code)
+        config = json.loads(
+            (self.config_home / "maintaining-task-handoffs/config.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(str(self.memory.resolve()), config["memory_path"])
+
+    def test_init_rejects_non_git_directory(self) -> None:
+        plain = self.repo.parent / "plain"
+        plain.mkdir()
+        with self.assertRaisesRegex(DocumentError, "memory_not_git_repo"):
+            self.service.init(plain)
+
+    def test_status_reports_dirty_and_upstream(self) -> None:
+        self.service.init(self.memory)
+        (self.memory / "dirty").write_text("x", encoding="utf-8")
+        status = self.service.status()
+        self.assertTrue(status.details["dirty"])
+        self.assertFalse(status.details["has_upstream"])
 
 
 if __name__ == "__main__":
