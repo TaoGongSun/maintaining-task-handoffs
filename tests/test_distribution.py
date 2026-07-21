@@ -33,6 +33,20 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("cannot guarantee", text)
         self.assert_event_based_checkpoint_contract(text)
 
+    def test_routine_git_work_does_not_activate_handoffs(self) -> None:
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        description = skill.split("---", 2)[1]
+        adapter = (ROOT / "adapters/trigger-block.md").read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("a complex branch or commit sequence", description)
+        self.assertIn("short standalone stage, commit, push, branch operation", description)
+        self.assertNotIn("branch or commit work", description)
+        self.assertIn("A Git operation alone does not activate this workflow.", skill)
+        self.assertIn("A Git operation alone does not activate this workflow.", adapter)
+        self.assertIn("短小、獨立的 stage／commit／push", readme)
+        self.assertIn("a short standalone stage, commit, push, or branch operation", readme)
+
     def test_skill_documents_index_and_per_task_lifecycle(self) -> None:
         text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("`.ai/HANDOFF.md` is the unfinished-task index", text)

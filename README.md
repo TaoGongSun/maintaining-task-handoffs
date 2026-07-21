@@ -29,8 +29,10 @@
 
 檔名用 `HANDOFF` 是因為內容給「下一個代理／下一輪對話」讀，不是給人做週報的長篇進度報告。
 
-**何時會寫入（長任務）**：正式 plan、三個以上實質步驟、多檔變更、branch／commit、約 10 分鐘以上，或留下未完成、需下一會話接續的工作。  
-**何時不寫**：純問答、沒有後續價值的短任務。  
+**何時會寫入（長任務）**：正式 plan、三個以上實質步驟、廣泛的多檔變更、複雜的 branch／commit 流程、約 10 分鐘以上，或留下未完成、需下一會話接續的工作。
+
+**何時不寫**：純問答、沒有後續價值的短任務；短小、獨立的 stage／commit／push 或 branch 操作不會自行觸發。
+
 **聊天怎麼回**：只保留路徑、精簡狀況，以及最後一行的**唯一具體下一步**。Checkpoint／pause 回報 `.ai/handoffs/<task-id>.md`；complete 因任務文件已刪除，改回報 `.ai/HANDOFF.md` 索引。
 
 ### 和手動 `/handoff` 類 skill 的差別
@@ -272,8 +274,10 @@ In plain terms it is:
 
 The filename is `HANDOFF` because the document is for the *next* agent or session, not a long human status report.
 
-**When it writes (long tasks):** formal plan, three or more substantive steps, multi-file work, branch/commit, about 10+ minutes, or unfinished work that another conversation may continue.  
-**When it does not:** simple Q&A or short tasks with no continuation value.  
+**When it writes (long tasks):** formal plan, three or more substantive steps, broad multi-file work, a complex branch/commit sequence, about 10+ minutes, or unfinished work that another conversation may continue.
+
+**When it does not:** simple Q&A or short tasks with no continuation value; a short standalone stage, commit, push, or branch operation does not activate it by itself.
+
 **Chat after writing:** only a path, concise status, and a **single concrete next action** on the last line. Checkpoint/pause reports `.ai/handoffs/<task-id>.md`; completion reports the `.ai/HANDOFF.md` index because the completed task document has been removed.
 
 ### How this differs from manual `/handoff` skills

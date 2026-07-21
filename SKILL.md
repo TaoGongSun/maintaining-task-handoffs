@@ -1,6 +1,6 @@
 ---
 name: maintaining-task-handoffs
-description: Use when work has a formal plan, three or more substantive steps, multiple changed files, branch or commit work, more than about ten minutes of work, unfinished state another conversation may need, or the user mentions handoff, resume, checkpoint, or long-task continuity.
+description: Use when work is genuinely long or continuation-sensitive, such as a formal plan, three or more substantive steps, broad multi-file work, a complex branch or commit sequence, more than about ten minutes of work, unfinished state another conversation may need, or an explicit request for handoff, resume, checkpoint, or long-task continuity. Do not use for a short standalone stage, commit, push, branch operation, or other routine Git task.
 ---
 
 # Maintaining Task Handoffs
@@ -9,7 +9,7 @@ Keep local-only handoffs under `<git-root>/.ai/`. `.ai/HANDOFF.md` is the unfini
 
 ## Activation is soft
 
-Use judgment to mark work as long. Short tasks and unrelated small tasks do not activate this workflow. Once activated, the gates below are mandatory until `handoff pause` or `handoff complete` succeeds.
+Use judgment to mark work as long. Short tasks and unrelated small tasks do not activate this workflow. A Git operation alone does not activate this workflow. Once activated, the gates below are mandatory until `handoff pause` or `handoff complete` succeeds.
 
 ## Semantic draft
 
