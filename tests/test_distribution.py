@@ -61,12 +61,10 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("handoff pause", text)
         self.assertIn("handoff complete", text)
         self.assertIn("Do not activate", text)
-        self.assert_event_based_checkpoint_contract(text)
-        self.assertIn("list only those plans under `## Plan files`", text)
-        self.assertIn("archive only the listed plans", text)
-        self.assertIn("Never scan directories for unrelated plans", text)
-        self.assertIn("`.ai/HANDOFF.md` as an index", text)
-        self.assertIn("`.ai/handoffs/<task-id>.md`", text)
+        self.assertIn("load and follow the `maintaining-task-handoffs` skill", text)
+        self.assertIn("$HOME/.agents/skills/maintaining-task-handoffs/SKILL.md", text)
+        self.assertNotIn("list only those plans under `## Plan files`", text)
+        self.assertNotIn("`.ai/handoffs/<task-id>.md`", text)
 
     def test_skill_requires_status_and_concrete_next_action_in_final_chat(self) -> None:
         text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -124,7 +122,7 @@ class SkillContractTests(unittest.TestCase):
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
         adapter = (ROOT / "adapters/trigger-block.md").read_text(encoding="utf-8")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        for text in (skill, adapter, readme):
+        for text in (skill, readme):
             lowered = text.lower()
             for phrase in (
                 "handoff memory init",
@@ -136,6 +134,16 @@ class SkillContractTests(unittest.TestCase):
                 "does not copy handoff",
             ):
                 self.assertIn(phrase.lower(), lowered)
+        adapter_lowered = adapter.lower()
+        for phrase in (
+            "handoff memory sync",
+            "all projects",
+            "private",
+            "memory_diverged",
+            "fast-forward",
+            "does not copy handoff",
+        ):
+            self.assertIn(phrase.lower(), adapter_lowered)
         for phrase in (
             "所有專案",
             "私人",
